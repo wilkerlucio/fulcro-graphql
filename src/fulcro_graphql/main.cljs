@@ -2,6 +2,7 @@
   (:require-macros [cljs.core.async.macros :refer [go go-loop]])
   (:require [fulcro.client.core :as fulcro]
             [fulcro.client.network :as fulcro.network]
+            [fulcro.client.data-fetch :as fetch]
             [cljs.core.async :refer [<! >! put!]]
             [cljs-promises.async :refer-macros [<?]]
             [goog.string :as gstr]
@@ -121,41 +122,39 @@
 (defonce app
   (atom (fulcro/new-fulcro-client :networking (make-network "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0" {}))))
 
-(om/defui ^:once Root
+(om/defui ^:once UiLink
+  static om/IQuery
+  (query [_] [:link/id :link/description :link/url])
+
+  static om/Ident
+  (ident [_ props] [:link/by-id (:link/id props)])
+
   Object
   (render [this]
-    (let [{:keys []} (om/props this)]
-      (dom/div nil))))
+    (let [{:link/keys [description]} (om/props this)]
+      (dom/div nil
+        description))))
+
+(def ui-link (om/factory UiLink))
+
+(om/defui ^:once Root
+  static om/IQuery
+  (query [_] [{:link/all-links (om/get-query UiLink)}])
+
+  Object
+  (render [this]
+    (let [{:keys [link/all-links]} (om/props this)]
+      (dom/div nil
+        (dom/button #js {:onClick #(fetch/load this :link/all-links UiLink)}
+          "Load Links")
+        (map ui-link all-links)))))
 
 (def root (om/factory Root))
 
 (defn init []
   (swap! app fulcro/mount Root "app-container"))
 
-(def sample-result
-  (clj->js
-    {"allLinks"
-     [{"id"          "cj5k85i81mejn0146f0853mde",
-       "description" "The best GraphQL client",
-       "url"         "http://dev.apollodata.com/"}
-      {"id"          "cj5k868x170vs0183pqlxsu0g",
-       "description" "The coolest GraphQL backend 😎",
-       "url"         "https://graph.cool"}
-      {"id"          "cj5k8aa0emhs40146j5v4jjyg",
-       "description" "The coolest GraphQL backend 😎",
-       "url"         "https://graph.cool"}
-      {"id"          "cj5k8bwvx78wf018371omt9zo",
-       "description" "The coolest GraphQL backend 😎",
-       "url"         "https://graph.cool"}
-      {"id"          "cj5k8ed06at2r0134ijxcjak4",
-       "description" "The coolest GraphQL backend 😎",
-       "url"         "https://graph.cool"}
-      {"id"          "cj5k8hvs7msi601461jqefa1t",
-       "description" "The coolest GraphQL backend 😎",
-       "url"         "https://graph.cool"}
-      {"id"          "cj5k8tpcen6ej0146xjtkxlqr",
-       "description" "Created from Om.next transaction",
-       "url"         "http://www.site.com"}]}))
+(init)
 
 (comment
   (go
