@@ -10,7 +10,8 @@
                  [org.omcljs/om "1.0.0-beta1"]
                  [figwheel-sidecar "0.5.11"]
                  [binaryage/devtools "0.9.4"]
-                 [jamesmacaulay/cljs-promises "0.1.0"]]
+                 [jamesmacaulay/cljs-promises "0.1.0"]
+                 [spec-coerce "1.0.0-alpha4"]]
 
   :cljsbuild {:builds [{:id           "site"
                         :figwheel     true

@@ -5,9 +5,11 @@
             [cljs.core.async :refer [<! >! put!]]
             [cljs-promises.async :refer-macros [<?]]
             [goog.string :as gstr]
+            [goog.object :as gobj]
             [om.next :as om]
             [om.dom :as dom]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [pathom.core :as p]))
 
 (cljs-promises.async/extend-promises-as-pair-channels!)
 
@@ -60,6 +62,28 @@
 (defn query->graphql [query]
   (node->graphql (om/query->ast query)))
 
+(defn graphql-reader [{:keys    [query ast]
+                       ::p/keys [entity]
+                       :as      env}]
+  (let [js-key (js-name (:key ast))]
+    (if (gobj/containsKey entity js-key)
+      (let [v (gobj/get entity js-key)]
+        (if (and (map? v) query)
+          (p/continue (assoc env ::p/entity v))
+          (if (js/Array.isArray v)
+            (mapv #(p/continue (assoc env ::p/entity %)) v)
+            v)))
+      ::p/continue)))
+
+(def parser (om/parser {:read p/read}))
+
+(defn parse [env tx]
+  (-> (parser
+        (assoc env
+          ::p/reader graphql-reader)
+        tx)
+      (p/read-chan-values)))
+
 (defn query [url q]
   (go
     (let [res (-> (js/fetch url
@@ -69,7 +93,7 @@
                   <? .json <?)]
       (if (.-error res)
         (throw (ex-info (.-error res) {:query q}))
-        (.-data res)))))
+        (<! (parse {::p/entity (.-data res)} q))))))
 
 (defrecord Network [url completed-app]
   fulcro.network/NetworkBehavior
@@ -86,7 +110,7 @@
                       <? .json <?)]
           (if (.-error res)
             (error (ex-info (.-error res) {:query edn}))
-            (ok (.-data res))))
+            (ok (<! (parse {::p/entity (.-data res)} edn)))))
         (catch :default e (error e)))))
 
   (start [this app] (assoc this :complete-app app)))
@@ -108,11 +132,44 @@
 (defn init []
   (swap! app fulcro/mount Root "app-container"))
 
+(def sample-result
+  (clj->js
+    {"allLinks"
+     [{"id"          "cj5k85i81mejn0146f0853mde",
+       "description" "The best GraphQL client",
+       "url"         "http://dev.apollodata.com/"}
+      {"id"          "cj5k868x170vs0183pqlxsu0g",
+       "description" "The coolest GraphQL backend 😎",
+       "url"         "https://graph.cool"}
+      {"id"          "cj5k8aa0emhs40146j5v4jjyg",
+       "description" "The coolest GraphQL backend 😎",
+       "url"         "https://graph.cool"}
+      {"id"          "cj5k8bwvx78wf018371omt9zo",
+       "description" "The coolest GraphQL backend 😎",
+       "url"         "https://graph.cool"}
+      {"id"          "cj5k8ed06at2r0134ijxcjak4",
+       "description" "The coolest GraphQL backend 😎",
+       "url"         "https://graph.cool"}
+      {"id"          "cj5k8hvs7msi601461jqefa1t",
+       "description" "The coolest GraphQL backend 😎",
+       "url"         "https://graph.cool"}
+      {"id"          "cj5k8tpcen6ej0146xjtkxlqr",
+       "description" "Created from Om.next transaction",
+       "url"         "http://www.site.com"}]}))
+
 (comment
   (go
-    (-> (query "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0"
-               [{:link/all-links [:link/id :link/description :link/url]}])
-        <! js/console.log))
+    (->> (query "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0"
+                [{:link/all-links [:link/id :link/description :link/url]}])
+         <! js/console.log))
+
+  sample-result
+
+  (js/console.log (js/Array.isArray #js []))
+
+  (go
+    (->> (parse {::p/entity sample-result} [{:link/all-links [:link/id :link/description :link/url]}])
+         <! js/console.log))
 
   (println (query->graphql `[(link/create-link {:link/description "Created from Om.next transaction"
                                                 :link/url         "http://www.site.com"})]))
