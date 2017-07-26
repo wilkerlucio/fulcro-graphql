@@ -10,9 +10,14 @@
             [om.next :as om]
             [om.dom :as dom]
             [clojure.string :as str]
-            [pathom.core :as p]))
+            [pathom.core :as p]
+            [spec-coerce.core :as sc]
+            [cljs.spec.alpha :as s]))
 
 (cljs-promises.async/extend-promises-as-pair-channels!)
+
+(defn get-load-query [comp]
+  (conj (om/get-query comp) :ui/fetch-state))
 
 (defn js-name [s]
   (gstr/toCamelCase (name s)))
@@ -69,11 +74,11 @@
   (let [js-key (js-name (:key ast))]
     (if (gobj/containsKey entity js-key)
       (let [v (gobj/get entity js-key)]
-        (if (and (map? v) query)
-          (p/continue (assoc env ::p/entity v))
-          (if (js/Array.isArray v)
-            (mapv #(p/continue (assoc env ::p/entity %)) v)
-            v)))
+        (if (js/Array.isArray v)
+          (mapv #(p/continue (assoc env ::p/entity %)) v)
+          (if (and (map? v) query)
+            (p/continue (assoc env ::p/entity v))
+            (sc/coerce (:key ast) v))))
       ::p/continue)))
 
 (def parser (om/parser {:read p/read}))
@@ -122,24 +127,28 @@
 (defonce app
   (atom (fulcro/new-fulcro-client :networking (make-network "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0" {}))))
 
+(s/def :lifecycle/created-at inst?)
+
 (om/defui ^:once UiLink
   static om/IQuery
-  (query [_] [:link/id :link/description :link/url])
+  (query [_] [:link/id :link/description :lifecycle/created-at :link/url])
 
   static om/Ident
   (ident [_ props] [:link/by-id (:link/id props)])
 
   Object
   (render [this]
-    (let [{:link/keys [description]} (om/props this)]
+    (let [{:link/keys [description]
+           :keys [lifecycle/created-at] :as props} (om/props this)]
+      (js/console.log props)
       (dom/div nil
-        description))))
+        (str created-at) " - " description))))
 
-(def ui-link (om/factory UiLink))
+(def ui-link (om/factory UiLink {:keyfn :link/id}))
 
 (om/defui ^:once Root
   static om/IQuery
-  (query [_] [{:link/all-links (om/get-query UiLink)}])
+  (query [_] [{:link/all-links (get-load-query UiLink)}])
 
   Object
   (render [this]
@@ -147,7 +156,10 @@
       (dom/div nil
         (dom/button #js {:onClick #(fetch/load this :link/all-links UiLink)}
           "Load Links")
-        (map ui-link all-links)))))
+        (if (fetch/loading? (:ui/fetch-state all-links))
+          (dom/div nil "Loading..."))
+        (if (sequential? all-links)
+          (map ui-link all-links))))))
 
 (def root (om/factory Root))
 
