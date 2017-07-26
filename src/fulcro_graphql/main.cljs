@@ -1,10 +1,12 @@
 (ns fulcro-graphql.main
   (:require-macros [cljs.core.async.macros :refer [go go-loop]])
   (:require [fulcro.client.core :as fulcro]
+            [fulcro.client.network :as fulcro.network]
             [cljs.core.async :refer [<! >! put!]]
             [cljs-promises.async :refer-macros [<?]]
             [goog.string :as gstr]
             [om.next :as om]
+            [om.dom :as dom]
             [clojure.string :as str]))
 
 (cljs-promises.async/extend-promises-as-pair-channels!)
@@ -47,8 +49,8 @@
     :call
     (str (pad-depth depth) (js-name dispatch-key) "(\n"
          (str/join ",\n" (for [[k v] params]
-                     (str (pad-depth (inc depth))
-                          (js-name k) ": " (js/JSON.stringify (clj->js v)))))
+                           (str (pad-depth (inc depth))
+                                (js-name k) ": " (js/JSON.stringify (clj->js v)))))
          ") {id}\n")
 
     :prop
@@ -58,9 +60,9 @@
 (defn query->graphql [query]
   (node->graphql (om/query->ast query)))
 
-(defn query [q]
+(defn query [url q]
   (go
-    (let [res (-> (js/fetch "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0"
+    (let [res (-> (js/fetch url
                             #js {:method  "post"
                                  :headers #js {"content-type" "application/json"}
                                  :body    (js/JSON.stringify #js {:query (query->graphql q)})})
@@ -69,9 +71,48 @@
         (throw (ex-info (.-error res) {:query q}))
         (.-data res)))))
 
+(defrecord Network [url completed-app]
+  fulcro.network/NetworkBehavior
+  (serialize-requests? [_] true)
+
+  fulcro.network/FulcroNetwork
+  (send [_ edn ok error]
+    (go
+      (try
+        (let [res (-> (js/fetch url
+                                #js {:method  "post"
+                                     :headers #js {"content-type" "application/json"}
+                                     :body    (js/JSON.stringify #js {:query (query->graphql edn)})})
+                      <? .json <?)]
+          (if (.-error res)
+            (error (ex-info (.-error res) {:query edn}))
+            (ok (.-data res))))
+        (catch :default e (error e)))))
+
+  (start [this app] (assoc this :complete-app app)))
+
+(defn make-network [url options]
+  (map->Network {:url url}))
+
+(defonce app
+  (atom (fulcro/new-fulcro-client :networking (make-network "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0" {}))))
+
+(om/defui ^:once Root
+  Object
+  (render [this]
+    (let [{:keys []} (om/props this)]
+      (dom/div nil))))
+
+(def root (om/factory Root))
+
+(defn init []
+  (swap! app fulcro/mount Root "app-container"))
+
 (comment
   (go
-    (js/console.log (<! (query [{:link/all-links [:link/id :link/description :link/url]}]))))
+    (-> (query "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0"
+               [{:link/all-links [:link/id :link/description :link/url]}])
+        <! js/console.log))
 
   (println (query->graphql `[(link/create-link {:link/description "Created from Om.next transaction"
                                                 :link/url         "http://www.site.com"})]))
@@ -82,7 +123,7 @@
 
   (go
     (-> (query `[(link/create-link {:link/description "Created from Om.next transaction"
-                                    :link/url "http://www.site.com"})])
+                                    :link/url         "http://www.site.com"})])
         <! js/console.log))
 
   (println (query->graphql [{:post/all-posts [:post/id :post/description :post/image-url]}])))
