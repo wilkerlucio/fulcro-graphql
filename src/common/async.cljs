@@ -2,15 +2,12 @@
   (:refer-clojure :exclude [map mapcat filter remove distinct concat take-while drop-while complement keep reduce])
   (:require-macros [cljs.core.async.macros :refer [go alt! go-loop]]
                    [common.async :refer [dochan go-catch <? <!expand]])
-  (:require [goog.net.Jsonp]
-            [goog.Uri]
-            [goog.events :as events]
-            [cljs.core.async :refer [>! <! chan put! close! alts! promise-chan] :as async])
-  (:import goog.events.EventType))
+  (:require [goog.events :as events]
+            [cljs.core.async :refer [>! <! chan put! close! alts! promise-chan] :as async]))
 
 (defn promise->chan [promise]
   (let [c (promise-chan)]
-    (.then promise #(put! c %) #(put! c %))
+    (.then promise #(put! c [% nil]) #(put! c [nil %]))
     c))
 
 (def js-error? (partial instance? js/Error))

@@ -1,18 +1,20 @@
 (ns fulcro-graphql.main
   (:require-macros [cljs.core.async.macros :refer [go go-loop]])
-  (:require [fulcro.client.core :as fulcro]
-            [fulcro.client.network :as fulcro.network]
-            [fulcro.client.data-fetch :as fetch]
-            [cljs.core.async :refer [<! >! put!]]
-            [cljs-promises.async :refer-macros [<?]]
-            [goog.string :as gstr]
-            [goog.object :as gobj]
-            [om.next :as om]
-            [om.dom :as dom]
+  (:require [cljs-promises.async :refer-macros [<?]]
+            [cljs.core.async :refer [<! >! put! promise-chan]]
+            [cljs.spec.alpha :as s]
             [clojure.string :as str]
+            [fulcro.client.core :as fulcro]
+            [fulcro.client.data-fetch :as fetch]
+            [fulcro.client.network :as fulcro.network]
+            [goog.events :as events]
+            [goog.object :as gobj]
+            [goog.string :as gstr]
+            [om.dom :as dom]
+            [om.next :as om]
             [pathom.core :as p]
-            [spec-coerce.core :as sc]
-            [cljs.spec.alpha :as s]))
+            [spec-coerce.core :as sc])
+  (:import [goog.net XhrIo EventType]))
 
 (cljs-promises.async/extend-promises-as-pair-channels!)
 
@@ -31,6 +33,22 @@
                                 (and (= :join type)
                                      (symbol? dispatch-key)))) children))))
 
+(defn stringify [x] (js/JSON.stringify (clj->js x)))
+
+(defn params->graphql
+  ([x] (params->graphql x true))
+  ([x root?]
+   (cond
+     (map? x)
+     (let [params (->> (into [] (map (fn [[k v]] (str (js-name k) ": " (params->graphql v false)))) x)
+                       (str/join ", "))]
+       (if root?
+         (str "(" params ")")
+         (str "{" params "}")))
+
+     :else
+     (stringify x))))
+
 (defn node->graphql [{:keys [type children dispatch-key depth params]
                       :or   {depth 0}}]
   (case type
@@ -41,7 +59,7 @@
     :join
     (cond
       (keyword? dispatch-key)
-      (str (pad-depth depth) (js-name dispatch-key) " {\n"
+      (str (pad-depth depth) (js-name dispatch-key) (some-> params params->graphql) " {\n"
            (str/join (map (comp node->graphql #(assoc % :depth (inc depth))) children))
            (pad-depth depth) "}\n")
 
@@ -49,16 +67,17 @@
       (str (pad-depth depth) (js-name dispatch-key) "(\n"
            (str/join ",\n" (for [[k v] params]
                              (str (pad-depth (inc depth))
-                                  (js-name k) ": " (js/JSON.stringify (clj->js v)))))
+                                  (js-name k) ": " (stringify v))))
            ") {\n"
            (str/join (map (comp node->graphql #(assoc % :depth (inc depth))) children))
            (pad-depth depth) "}\n"))
 
     :call
     (str (pad-depth depth) (js-name dispatch-key) "(\n"
-         (str/join ",\n" (for [[k v] params]
-                           (str (pad-depth (inc depth))
-                                (js-name k) ": " (js/JSON.stringify (clj->js v)))))
+         (->> (for [[k v] params]
+                (str (pad-depth (inc depth))
+                     (js-name k) ": " (stringify v)))
+              (str/join ",\n"))
          ") {id}\n")
 
     :prop
@@ -76,7 +95,7 @@
       (let [v (gobj/get entity js-key)]
         (if (js/Array.isArray v)
           (mapv #(p/continue (assoc env ::p/entity %)) v)
-          (if (and (map? v) query)
+          (if (and query (= (type v) js/Object))
             (p/continue (assoc env ::p/entity v))
             (sc/coerce (:key ast) v))))
       ::p/continue)))
@@ -90,12 +109,20 @@
         tx)
       (p/read-chan-values)))
 
-(defn query [url q]
+(defn http [{::keys [url body method headers]
+             :or {method "GET"}}]
+  (let [c (promise-chan)
+        xhr (XhrIo.)]
+    (events/listen xhr (.-SUCCESS EventType) #(put! c [% nil]))
+    (events/listen xhr (.-ERROR EventType) #(put! c [nil %]))
+    (.send xhr url method body (clj->js headers))))
+
+(defn query [{::keys [url q]}]
   (go
-    (let [res (-> (js/fetch url
-                            #js {:method  "post"
-                                 :headers #js {"content-type" "application/json"}
-                                 :body    (js/JSON.stringify #js {:query (query->graphql q)})})
+    (let [res (-> (http #::{:url     url
+                            :method  "post"
+                            :headers {"content-type" "application/json"}
+                            :body    (js/JSON.stringify #js {:query (query->graphql q)})})
                   <? .json <?)]
       (if (.-error res)
         (throw (ex-info (.-error res) {:query q}))
@@ -139,8 +166,7 @@
   Object
   (render [this]
     (let [{:link/keys [description]
-           :keys [lifecycle/created-at] :as props} (om/props this)]
-      (js/console.log props)
+           :keys      [lifecycle/created-at] :as props} (om/props this)]
       (dom/div nil
         (str created-at) " - " description))))
 
@@ -168,13 +194,50 @@
 
 (init)
 
+(defn log-state []
+  (->> @app :reconciler :config :state deref
+       js/console.log))
+
+(s/def :link/updated-at inst?)
+
 (comment
   (go
     (->> (query "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0"
-                [{:link/all-links [:link/id :link/description :link/url]}])
+                [{:link/all-links [:link/id :link/description :link/url :link/updated-at]}])
          <! js/console.log))
 
-  sample-result
+  (go
+    (->> (query "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0"
+                ['()])
+         <! js/console.log))
+
+  (go
+    (->> (query "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0"
+                [{:all-links [:id :description :url]}])
+         <! js/console.log))
+
+  (println (query->graphql [{:all-links [:id :description :url]}]))
+
+  (go
+    (->> (query "https://api.github.com/graphql?access_token="
+                `[{:viewer
+                   [:login
+                    ({:repositories
+                      [{:nodes [:name :description]}]}
+                      {:last 10})]}
+                  ({:repository [:id :description]}
+                    {:name "spec-coerce" :owner "wilkerlucio"})])
+         <! js/console.log))
+
+  (println (query->graphql `[{:viewer
+                              [:login
+                               ({:repositories
+                                 [{:nodes [:name :description]}]}
+                                 {:last 10})]}
+                             ({:repository [:id :description]}
+                               {:name "spec-coerce" :owner "wilkerlucio"})]))
+
+  (params->graphql {:name "spec-coerce" :owner "wilkerlucio"})
 
   (js/console.log (js/Array.isArray #js []))
 
