@@ -12,7 +12,7 @@
                  [binaryage/devtools "0.9.4"]
                  [jamesmacaulay/cljs-promises "0.1.0"]
                  [spec-coerce "1.0.0-alpha4"]
-                 [com.wsscode/pathom "1.0.0-beta1-SNAPSHOT"]]
+                 [com.wsscode/pathom "1.0.0-beta1"]]
 
   :cljsbuild {:builds [{:id           "site"
                         :figwheel     true
