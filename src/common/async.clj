@@ -12,13 +12,13 @@
            :done)))))
 
 (defmacro <? [ch]
-  `(common.async/throw-err (cljs.core.async/<! ~ch)))
+  `(common.async/consume-pair (cljs.core.async/<! ~ch)))
 
 (defmacro go-catch [& body]
   `(cljs.core.async.macros/go
      (try
-       ~@body
-       (catch :default e e))))
+       [~@body nil]
+       (catch :default e [nil e]))))
 
 (defmacro <!expand [value]
   `(cljs.core.async/<! (common.async/expand-value ~value)))
