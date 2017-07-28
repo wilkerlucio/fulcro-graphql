@@ -1,4 +1,4 @@
-(ns fulcro-graphql.network
+(ns com.wsscode.fulcro-graphql.network
   (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [cljs.core.async :refer [<! >! put! promise-chan]]
             [common.async :refer-macros [<? go-catch]]

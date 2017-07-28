@@ -2,7 +2,7 @@
   (:require [cljs.spec.alpha :as s]
             [fulcro.client.core :as fulcro]
             [fulcro.client.data-fetch :as fetch]
-            [fulcro-graphql.network :refer [graphql-network]]
+            [com.wsscode.fulcro-graphql.network :refer [graphql-network]]
             [om.dom :as dom]
             [om.next :as om]))
 
