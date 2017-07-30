@@ -54,13 +54,10 @@
 (defn icon [name]
   (dom/i #js {:className (str "fa fa-" name)}))
 
-(defn filter-simple-keys [m]
-  (into {} (filter (fn [[k _]] (simple-keyword? k))) m))
-
 (defn input [{::keys [target field] :as props}]
   (dom/input (-> {:value    (some-> (om/props target) field)
                   :onChange #(mutations/set-string! target field :event %)}
-                 (merge (filter-simple-keys props))
+                 (merge (into {} (filter (fn [[k _]] (simple-keyword? k))) props))
                  (clj->js))))
 
 (om/defui ^:once LinkForm
@@ -76,7 +73,8 @@
   (ident [_ props] [:link/by-id (:link/id props)])
 
   static css/CSS
-  (local-rules [_] [])
+  (local-rules [_] [[:.form-grid {:display "grid"
+                                  :grid-template-columns "max-content auto"}]])
   (include-children [_] [])
 
   Object
@@ -86,10 +84,14 @@
       (dom/form #js {:onSubmit (pd #(om/transact! this `[(link/create-link ~props)
                                                          :ui/link-form
                                                          :link/all-links]))}
-        (input {::target     this ::field :link/title
-                :placeholder "Title"})
-        (input {::target     this ::field :link/url
-                :placeholder "Url"})
+        (dom/div #js {:className (:form-grid css)}
+          (dom/label nil "title")
+          (input {::target     this ::field :link/title
+                  :placeholder "Title"})
+
+          (dom/label nil "url")
+          (input {::target     this ::field :link/url
+                  :placeholder "Url"}))
         (dom/button #js {:type "submit"} "Create link")))))
 
 (def link-form (om/factory LinkForm))
@@ -99,13 +101,14 @@
   (initial-state [_ _] {})
 
   static om/IQuery
-  (query [_] [:link/id :link/title #_ :link/position :link/url #_ :link/points :lifecycle/created-at])
+  (query [_] [:link/id :link/title :link/url :link/points :lifecycle/created-at])
 
   static om/Ident
   (ident [_ props] [:link/by-id (:link/id props)])
 
   static css/CSS
-  (local-rules [_] [[:.container {:margin "5px 0"}]
+  (local-rules [_] [[:.container {:margin "8px 0"}]
+                    [:.content {:margin-left "3px"}]
                     [:.position {:color      style/color-grey-828282
                                  :text-align "right"}]
                     [:.grey-text {:color style/color-grey-828282}]
@@ -122,13 +125,14 @@
       (dom/div #js {:className (str "flex-row " (:container css))}
         (dom/div #js {:className (:position css)}
           (dom/span nil position) ". "
-          (dom/a #js {:href "#" :className (:grey-text css)} (icon "sort-asc")))
-        (dom/div nil
+          (dom/a #js {:href "#" :className (:grey-text css)}
+            (dom/img #js {:src "https://news.ycombinator.com/grayarrow.gif"})))
+        (dom/div #js {:className (:content css)}
           (dom/div nil
             (dom/a #js {:href "#"} title)
             (dom/span #js {:className (:discrete css)}
               " (" (dom/a #js {:href url :className (:discrete css)} (url-domain url)) ")"))
-          (dom/div #js {:className (:discrete css)}
+          (dom/div #js {:className (str (:discrete css))}
             points " point" (if (not= 1 points) "s") " by "
             (dom/a #js {:href "#"} "author")
             (dom/a #js {:href "#"} " 6 minutes ago")))))))
@@ -189,7 +193,7 @@
 
   static css/CSS
   (local-rules [_] [])
-  (include-children [_] [UiLink Header])
+  (include-children [_] [UiLink Header LinkForm])
 
   static css/Global
   (global-rules [_] style/global-styles)
@@ -202,12 +206,12 @@
         (dom/div #js {:className "container content-background"}
           (header {})
 
-
           (if (fetch/loading? (:ui/fetch-state all-links))
             (dom/div nil "Loading..."))
           (if (sequential? all-links)
-            (map ui-link all-links))
+            (map-indexed (fn [i l] (ui-link (assoc l :link/position (inc i)))) all-links))
 
+          (dom/hr nil)
 
           (link-form (:ui/link-form props)))))))
 

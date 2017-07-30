@@ -22,6 +22,9 @@
    [:.flex-row flex-row]
    [:.flex-align-center {:align-items "center"}]])
 
+(def input {:font-family "monospace"
+            :width "410px"})
+
 (def global-styles
   (concat
     flex-classes
@@ -32,6 +35,8 @@
      [:a {:color color-black
           :text-decoration "none"}]
      [:a:hover {:text-decoration "underline"}]
+
+     [:input input]
 
      [:.container container]
      [:.content-background content-background]]))
