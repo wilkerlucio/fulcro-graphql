@@ -14,7 +14,7 @@
 (defn js-name [s]
   (gstr/toCamelCase (name s)))
 
-(def parser (om/parser {:read p/pathom-read}))
+(def parser (om/parser {:read p/pathom-read :mutate om/dispatch}))
 
 (defn parse [env tx]
   (parser
@@ -28,8 +28,8 @@
              :or    {method "GET"}}]
   (let [c   (promise-chan)
         xhr (XhrIo.)]
-    (events/listen xhr (.-SUCCESS EventType) #(put! c [[% (.getResponseText xhr)] nil]))
-    (events/listen xhr (.-ERROR EventType) #(put! c [nil %]))
+    (events/listen xhr (.-SUCCESS EventType) #(put! c [% (.getResponseText xhr)]))
+    (events/listen xhr (.-ERROR EventType) #(put! c %))
     (.send xhr url method body (clj->js headers))
     c))
 
@@ -44,7 +44,7 @@
         (throw (ex-info (.-error res) {:query q}))
         (parse {::p/entity (.-data (js/JSON.parse text))} q)))))
 
-(defrecord Network [url completed-app]
+(defrecord Network [url]
   fulcro.network/NetworkBehavior
   (serialize-requests? [_] true)
 
@@ -54,9 +54,11 @@
       (try
         (-> (query #::{:url url :q edn})
             <? ok)
-        (catch :default e (error e)))))
+        (catch :default e
+          (js/console.log "ERROR NET" e)
+          (error e)))))
 
-  (start [this app] (assoc this :complete-app app)))
+  (start [this app]))
 
 (defn graphql-network [url]
   (map->Network {:url url}))
@@ -67,13 +69,25 @@
                     :q   [{:link/all-links [:link/id :link/description :link/url :link/updated-at]}]})
          <? js/console.log))
 
+  (go
+    (->> (query #::{:url "https://api.github.com/graphql?access_token="
+                    :q   `[{:viewer
+                            [:login
+                             ({:repositories
+                               [{:nodes [:name :description]}]}
+                               {:last 10})]}
+                           ({:repository [:id :description]}
+                             {:name "spec-coerce" :owner "wilkerlucio"})]})
+         <? js/console.log))
+
   (println (gql/query->graphql [{:link/all-links [:link/id :link/description :link/url :link/updated-at]}]
                                {::gql/js-name js-name}))
 
-  (println (gql/query->graphql `[{:viewer
-                                  [:login
-                                   ({:repositories
-                                     [{:nodes [:name :description]}]}
-                                     {:last 10})]}
-                                 ({:repository [:id :description]}
-                                   {:name "spec-coerce" :owner "wilkerlucio"})])))
+  (js/console.log
+    (gql/query->graphql `[{:viewer
+                           [:login
+                            ({:repositories
+                              [{:nodes [:name :description]}]}
+                              {:last 10})]}
+                          ({:repository [:id :description]}
+                            {:name "spec-coerce" :owner "wilkerlucio"})])))

@@ -10,11 +10,13 @@
     (.then promise #(put! c [% nil]) #(put! c [nil %]))
     c))
 
-(defn consume-pair
-  [[val err]]
-  (if err
-    (throw err)
-    val))
+(def js-error? (partial instance? js/Error))
+
+(def remove-js-errors (cljs.core/remove js-error?))
+
+(defn throw-err [e]
+  (when (js-error? e) (throw e))
+  e)
 
 (defn listen
   ([el evt] (listen el evt (chan)))
