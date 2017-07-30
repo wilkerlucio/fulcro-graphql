@@ -5,6 +5,7 @@
             [fulcro.client.network :as fulcro.network]
             [goog.events :as events]
             [goog.string :as gstr]
+            [goog.object :as gobj]
             [om.next :as om]
             [com.wsscode.pathom.core :as p]
             [com.wsscode.pathom.graphql :as gql]
@@ -14,7 +15,16 @@
 (defn js-name [s]
   (gstr/toCamelCase (name s)))
 
-(def parser (om/parser {:read p/pathom-read :mutate om/dispatch}))
+(defn mutation [{::p/keys [entity js-key-transform]} key params]
+  {:action
+   (fn []
+     (if-let [[field id] (gql/find-id params)]
+       (let [new-id (gobj/getValueByKeys entity #js [(js-key-transform key)
+                                                     (js-key-transform field)])]
+         {:tempids {id new-id}})
+       nil))})
+
+(def parser (om/parser {:read p/pathom-read :mutate mutation}))
 
 (defn parse [env tx]
   (parser
@@ -33,6 +43,13 @@
     (.send xhr url method body (clj->js headers))
     c))
 
+(defn lift-tempids [res]
+  (->> res
+       (into {} (map (fn [[k v]]
+                       (if (symbol? k)
+                         [k (:result v)]
+                         [k v]))))))
+
 (defn query [{::keys [url q]}]
   (go-catch
     (let [[res text] (-> (http #::{:url     url
@@ -42,7 +59,8 @@
                          <?)]
       (if (.-error res)
         (throw (ex-info (.-error res) {:query q}))
-        (parse {::p/entity (.-data (js/JSON.parse text))} q)))))
+        (->> (parse {::p/entity (.-data (js/JSON.parse text))} q)
+             (lift-tempids))))))
 
 (defrecord Network [url]
   fulcro.network/NetworkBehavior
@@ -66,7 +84,7 @@
 (comment
   (go
     (->> (query #::{:url "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0"
-                    :q   [{:link/all-links [:link/id :link/description :link/url :link/updated-at]}]})
+                    :q   [{:link/all-links [:link/id :link/title :link/url :link/updated-at]}]})
          <? js/console.log))
 
   (go
@@ -80,7 +98,7 @@
                              {:name "spec-coerce" :owner "wilkerlucio"})]})
          <? js/console.log))
 
-  (println (gql/query->graphql [{:link/all-links [:link/id :link/description :link/url :link/updated-at]}]
+  (println (gql/query->graphql [{:link/all-links [:link/id :link/title :link/url :link/updated-at]}]
                                {::gql/js-name js-name}))
 
   (js/console.log

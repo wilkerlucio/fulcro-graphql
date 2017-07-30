@@ -2,12 +2,47 @@
   (:require [cljs.spec.alpha :as s]
             [fulcro.client.core :as fulcro]
             [fulcro.client.data-fetch :as fetch]
+            [fulcro.client.mutations :as mutations]
             [fulcro-css.css :as css]
             [fulcro-graphql.styles :as style]
+            [com.wsscode.pathom.graphql :as gql]
             [com.wsscode.fulcro-graphql.network :refer [graphql-network]]
             [om.dom :as dom]
             [om.next :as om])
   (:import [goog.Uri]))
+
+(s/def :link/id (s/or :final string? :tmp om/tempid?))
+(s/def :link/title string?)
+(s/def :link/position pos-int?)
+(s/def :link/url string?)
+(s/def :link/points pos-int?)
+
+(s/def :lifecycle/created-at inst?)
+
+(declare LinkForm)
+
+(defmethod mutations/mutate 'link/create-link [{:keys [state ast]} _ {:link/keys [title url id] :as link}]
+  {:remote
+   (assoc ast :params (select-keys link [:link/id :link/title :link/url]))
+
+   :action
+   (fn []
+     (let [ref      [:link/by-id id]
+           new-link (fulcro/get-initial-state LinkForm {})]
+       (swap! state (comp #(assoc-in % ref {:link/id              id
+                                            :link/title           title
+                                            :link/url             url
+                                            :link/position        (inc (count (get @state :link/all-links)))
+                                            :link/points          1
+                                            :lifecycle/created-at (js/Date.)})
+                          #(update % :link/all-links conj ref)
+                          #(assoc-in % [:link/by-id (:link/id new-link)] new-link)
+                          #(assoc % :ui/link-form [:link/by-id (:link/id new-link)])))))})
+
+(defn pd [f]
+  (fn [e]
+    (.preventDefault e)
+    (f e)))
 
 (defn url-domain [url]
   (-> (goog.Uri. url)
@@ -19,29 +54,69 @@
 (defn icon [name]
   (dom/i #js {:className (str "fa fa-" name)}))
 
+(defn filter-simple-keys [m]
+  (into {} (filter (fn [[k _]] (simple-keyword? k))) m))
+
+(defn input [{::keys [target field] :as props}]
+  (dom/input (-> {:value    (some-> (om/props target) field)
+                  :onChange #(mutations/set-string! target field :event %)}
+                 (merge (filter-simple-keys props))
+                 (clj->js))))
+
+(om/defui ^:once LinkForm
+  static fulcro/InitialAppState
+  (initial-state [_ _] {:link/id    (om/tempid)
+                        :link/url   "http://sample.com/site"
+                        :link/title "Some Info"})
+
+  static om/IQuery
+  (query [_] [:link/id :link/url :link/title])
+
+  static om/Ident
+  (ident [_ props] [:link/by-id (:link/id props)])
+
+  static css/CSS
+  (local-rules [_] [])
+  (include-children [_] [])
+
+  Object
+  (render [this]
+    (let [props (om/props this)
+          css   (css/get-classnames LinkForm)]
+      (dom/form #js {:onSubmit (pd #(om/transact! this `[(link/create-link ~props)
+                                                         :ui/link-form
+                                                         :link/all-links]))}
+        (input {::target     this ::field :link/title
+                :placeholder "Title"})
+        (input {::target     this ::field :link/url
+                :placeholder "Url"})
+        (dom/button #js {:type "submit"} "Create link")))))
+
+(def link-form (om/factory LinkForm))
+
 (om/defui ^:once UiLink
   static fulcro/InitialAppState
   (initial-state [_ _] {})
 
   static om/IQuery
-  (query [_] [:link/id :link/description :link/position :link/url])
+  (query [_] [:link/id :link/title #_ :link/position :link/url #_ :link/points :lifecycle/created-at])
 
   static om/Ident
   (ident [_ props] [:link/by-id (:link/id props)])
 
   static css/CSS
   (local-rules [_] [[:.container {:margin "5px 0"}]
-                    [:.position {:color style/color-grey-828282
+                    [:.position {:color      style/color-grey-828282
                                  :text-align "right"}]
                     [:.grey-text {:color style/color-grey-828282}]
                     [:.discrete (garden.selectors/> :.discrete "a")
                      {:color     style/color-grey-828282
-                                 :font-size style/font-8}]])
+                      :font-size style/font-8}]])
   (include-children [_] [])
 
   Object
   (render [this]
-    (let [{:link/keys [description position url]
+    (let [{:link/keys [title position url points]
            :as        props} (om/props this)
           css (css/get-classnames UiLink)]
       (dom/div #js {:className (str "flex-row " (:container css))}
@@ -50,11 +125,11 @@
           (dom/a #js {:href "#" :className (:grey-text css)} (icon "sort-asc")))
         (dom/div nil
           (dom/div nil
-            (dom/a #js {:href "#"} description)
+            (dom/a #js {:href "#"} title)
             (dom/span #js {:className (:discrete css)}
               " (" (dom/a #js {:href url :className (:discrete css)} (url-domain url)) ")"))
           (dom/div #js {:className (:discrete css)}
-            "1 point by "
+            points " point" (if (not= 1 points) "s") " by "
             (dom/a #js {:href "#"} "author")
             (dom/a #js {:href "#"} " 6 minutes ago")))))))
 
@@ -90,21 +165,26 @@
 (om/defui ^:once Root
   static fulcro/InitialAppState
   (initial-state [_ _] {:ui/react-key   (random-uuid)
-                        :link/all-links [{:link/id          (random-uuid)
-                                          :link/description "An Algebraic Language for the Manipulation of Symbolic Expressions (1958) [pdf]"
-                                          :link/url         "http://www.softwarepreservation.org/projects/LISP/MIT/AIM-001.pdf"
-                                          :link/position    1}
-                                         {:link/id          (random-uuid)
-                                          :link/description "Why I left Medium and moved back to my own domain"
-                                          :link/url         "https://arslan.io/2017/07/30/why-i-left-medium-and-moved-back-to-my-own-domain/"
-                                          :link/position    2}
-                                         {:link/id          (random-uuid)
-                                          :link/description "Ubershaders: A Ridiculous Solution to an Impossible Problem"
-                                          :link/url         "https://dolphin-emu.org/blog/2017/07/30/ubershaders/"
-                                          :link/position    3}]})
+                        :ui/link-form   (fulcro/get-initial-state LinkForm {})
+                        :link/all-links [#_ #_ #_{:link/id       (random-uuid)
+                                          :link/title    "An Algebraic Language for the Manipulation of Symbolic Expressions (1958) [pdf]"
+                                          :link/url      "http://www.softwarepreservation.org/projects/LISP/MIT/AIM-001.pdf"
+                                          :link/position 1
+                                          :link/points   1}
+                                         {:link/id       (random-uuid)
+                                          :link/title    "Why I left Medium and moved back to my own domain"
+                                          :link/url      "https://arslan.io/2017/07/30/why-i-left-medium-and-moved-back-to-my-own-domain/"
+                                          :link/position 2
+                                          :link/points   2}
+                                         {:link/id       (random-uuid)
+                                          :link/title    "Ubershaders: A Ridiculous Solution to an Impossible Problem"
+                                          :link/url      "https://dolphin-emu.org/blog/2017/07/30/ubershaders/"
+                                          :link/position 3
+                                          :link/points   1}]})
 
   static om/IQuery
   (query [_] [{:link/all-links (get-load-query UiLink)}
+              {:ui/link-form (om/get-query LinkForm)}
               :ui/react-key])
 
   static css/CSS
@@ -116,20 +196,25 @@
 
   Object
   (render [this]
-    (let [{:keys [link/all-links ui/react-key]} (om/props this)
+    (let [{:keys [link/all-links ui/react-key] :as props} (om/props this)
           css (css/get-classnames Root)]
       (dom/div #js {:key react-key}
         (dom/div #js {:className "container content-background"}
           (header {})
+
+
           (if (fetch/loading? (:ui/fetch-state all-links))
             (dom/div nil "Loading..."))
           (if (sequential? all-links)
-            (map ui-link all-links)))))))
+            (map ui-link all-links))
+
+
+          (link-form (:ui/link-form props)))))))
 
 (defonce app
   (atom (fulcro/new-fulcro-client
           :networking (graphql-network "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0")
-          :started-callback (fn [app] #_(fetch/load app :link/all-links UiLink)))))
+          :started-callback (fn [app] (fetch/load app :link/all-links UiLink)))))
 
 (defn init [] (swap! app fulcro/mount Root "app-container"))
 
