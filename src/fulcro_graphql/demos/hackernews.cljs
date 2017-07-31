@@ -63,8 +63,8 @@
 (om/defui ^:once LinkForm
   static fulcro/InitialAppState
   (initial-state [_ _] {:link/id    (om/tempid)
-                        :link/url   "http://sample.com/site"
-                        :link/title "Some Info"})
+                        :link/url   ""
+                        :link/title ""})
 
   static om/IQuery
   (query [_] [:link/id :link/url :link/title])
@@ -170,21 +170,7 @@
   static fulcro/InitialAppState
   (initial-state [_ _] {:ui/react-key   (random-uuid)
                         :ui/link-form   (fulcro/get-initial-state LinkForm {})
-                        :link/all-links [#_ #_ #_{:link/id       (random-uuid)
-                                          :link/title    "An Algebraic Language for the Manipulation of Symbolic Expressions (1958) [pdf]"
-                                          :link/url      "http://www.softwarepreservation.org/projects/LISP/MIT/AIM-001.pdf"
-                                          :link/position 1
-                                          :link/points   1}
-                                         {:link/id       (random-uuid)
-                                          :link/title    "Why I left Medium and moved back to my own domain"
-                                          :link/url      "https://arslan.io/2017/07/30/why-i-left-medium-and-moved-back-to-my-own-domain/"
-                                          :link/position 2
-                                          :link/points   2}
-                                         {:link/id       (random-uuid)
-                                          :link/title    "Ubershaders: A Ridiculous Solution to an Impossible Problem"
-                                          :link/url      "https://dolphin-emu.org/blog/2017/07/30/ubershaders/"
-                                          :link/position 3
-                                          :link/points   1}]})
+                        :link/all-links []})
 
   static om/IQuery
   (query [_] [{:link/all-links (get-load-query UiLink)}
