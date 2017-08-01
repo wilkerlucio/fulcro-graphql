@@ -32,11 +32,13 @@
     [[:body {:background  color-white
              :font-family "Verdana, Geneva, sans-serif"
              :font-size   font-10}]
-     [:a {:color color-black
-          :text-decoration "none"}]
-     [:a:hover {:text-decoration "underline"}]
 
-     [:input input]
+     [:a {:color           color-black
+          :text-decoration "none"}
+      [:&:hover {:text-decoration "underline"}]]
+
+     [:input input
+      [:&:focus {:outline "none"}]]
 
      [:.container container]
      [:.content-background content-background]]))

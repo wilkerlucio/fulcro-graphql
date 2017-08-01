@@ -35,7 +35,7 @@
                                             :link/position        (inc (count (get @state :link/all-links)))
                                             :link/points          1
                                             :lifecycle/created-at (js/Date.)})
-                          #(update % :link/all-links conj ref)
+                          #(update-in % [:page/by-id :page/top-links :link/all-links] conj ref)
                           #(assoc-in % [:link/by-id (:link/id new-link)] new-link)
                           #(assoc % :ui/link-form [:link/by-id (:link/id new-link)])))))})
 
@@ -73,7 +73,7 @@
   (ident [_ props] [:link/by-id (:link/id props)])
 
   static css/CSS
-  (local-rules [_] [[:.form-grid {:display "grid"
+  (local-rules [_] [[:.form-grid {:display               "grid"
                                   :grid-template-columns "max-content auto"}]])
   (include-children [_] [])
 
@@ -112,9 +112,9 @@
                     [:.position {:color      style/color-grey-828282
                                  :text-align "right"}]
                     [:.grey-text {:color style/color-grey-828282}]
-                    [:.discrete (garden.selectors/> :.discrete "a")
-                     {:color     style/color-grey-828282
-                      :font-size style/font-8}]])
+                    [:.discrete
+                     [:& :a {:color     style/color-grey-828282
+                             :font-size style/font-8}]]])
   (include-children [_] [])
 
   Object
@@ -166,45 +166,61 @@
 
 (def header (om/factory Header))
 
+(om/defui ^:once TopLinks
+  static fulcro/InitialAppState
+  (initial-state [_ _] {:link/all-links []})
+
+  static om/IQuery
+  (query [_] [{:link/all-links (get-load-query UiLink)}])
+
+  static om/Ident
+  (ident [_ props] [:page/by-id :page/top-links])
+
+  Object
+  (render [this]
+    (let [{:keys [link/all-links]} (om/props this)]
+      (dom/div nil
+        (if (fetch/loading? (:ui/fetch-state all-links))
+          (dom/div nil "Loading..."))
+        (if (sequential? all-links)
+          (map-indexed (fn [i l] (ui-link (assoc l :link/position (inc i)))) all-links))))))
+
+(def top-links (om/factory TopLinks))
+
 (om/defui ^:once Root
   static fulcro/InitialAppState
-  (initial-state [_ _] {:ui/react-key   (random-uuid)
-                        :ui/link-form   (fulcro/get-initial-state LinkForm {})
-                        :link/all-links []})
+  (initial-state [_ _] {:ui/react-key (random-uuid)
+                        :ui/link-form (fulcro/get-initial-state LinkForm {})
+                        :ui/all-links (fulcro/get-initial-state TopLinks {})})
 
   static om/IQuery
   (query [_] [{:link/all-links (get-load-query UiLink)}
               {:ui/link-form (om/get-query LinkForm)}
+              {:ui/all-links (om/get-query TopLinks)}
               :ui/react-key])
 
   static css/CSS
   (local-rules [_] [])
-  (include-children [_] [UiLink Header LinkForm])
+  (include-children [_] [UiLink Header LinkForm TopLinks])
 
   static css/Global
   (global-rules [_] style/global-styles)
 
   Object
   (render [this]
-    (let [{:keys [link/all-links ui/react-key] :as props} (om/props this)
+    (let [{:keys [ui/react-key ui/all-links] :as props} (om/props this)
           css (css/get-classnames Root)]
       (dom/div #js {:key react-key}
         (dom/div #js {:className "container content-background"}
           (header {})
-
-          (if (fetch/loading? (:ui/fetch-state all-links))
-            (dom/div nil "Loading..."))
-          (if (sequential? all-links)
-            (map-indexed (fn [i l] (ui-link (assoc l :link/position (inc i)))) all-links))
-
+          (top-links all-links)
           (dom/hr nil)
-
           (link-form (:ui/link-form props)))))))
 
 (defonce app
   (atom (fulcro/new-fulcro-client
           :networking (graphql-network "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0")
-          :started-callback (fn [app] (fetch/load app :link/all-links UiLink)))))
+          :started-callback (fn [app] (fetch/load app :link/all-links UiLink {:target [:page/by-id :page/top-links :link/all-links]})))))
 
 (defn init [] (swap! app fulcro/mount Root "app-container"))
 
