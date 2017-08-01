@@ -1,5 +1,6 @@
 (ns fulcro-graphql.demos.hackernews
   (:require [cljs.spec.alpha :as s]
+            [clojure.data :refer [diff]]
             [fulcro.client.core :as fulcro]
             [fulcro.client.data-fetch :as fetch]
             [fulcro.client.mutations :as mutations]
@@ -21,6 +22,12 @@
 
 (declare LinkForm)
 
+(comment
+  (let [a {:id "123" :points 1 :name "a" :more [1 2]}
+        b {:id "123" :points 2}
+        [x y z] (diff a b)]
+    (merge y (select-keys z [:id]))))
+
 (defmethod mutations/mutate 'link/create-link [{:keys [state ast]} _ {:link/keys [title url id] :as link}]
   {:remote
    (assoc ast :params (select-keys link [:link/id :link/title :link/url]))
@@ -38,6 +45,17 @@
                           #(update-in % [:page/by-id :page/top-links :link/all-links] conj ref)
                           #(assoc-in % [:link/by-id (:link/id new-link)] new-link)
                           #(assoc % :ui/link-form [:link/by-id (:link/id new-link)])))))})
+
+(defmethod mutations/mutate 'link/update-link [{:keys [state ast]} _ {:link/keys [id] :as link}]
+  {:remote
+   (assoc ast :params
+              (-> (select-keys link [:link/id :link/points])
+                  (assoc ::gql/mutate-join [:link/id])))
+
+   :action
+   (fn []
+     (let [ref [:link/by-id id]]
+       (swap! state update-in ref merge link)))})
 
 (defn pd [f]
   (fn [e]
@@ -119,13 +137,16 @@
 
   Object
   (render [this]
-    (let [{:link/keys [title position url points]
+    (let [{:link/keys [title url points]
            :as        props} (om/props this)
+          {:link/keys [position]} (om/get-computed props)
           css (css/get-classnames UiLink)]
       (dom/div #js {:className (str "flex-row " (:container css))}
         (dom/div #js {:className (:position css)}
           (dom/span nil position) ". "
-          (dom/a #js {:href "#" :className (:grey-text css)}
+          (dom/a #js {:href      "#"
+                      :onClick   (pd #(om/transact! this `[(link/update-link ~(update props :link/points inc))]))
+                      :className (:grey-text css)}
             (dom/img #js {:src "https://news.ycombinator.com/grayarrow.gif"})))
         (dom/div #js {:className (:content css)}
           (dom/div nil
@@ -183,7 +204,7 @@
         (if (fetch/loading? (:ui/fetch-state all-links))
           (dom/div nil "Loading..."))
         (if (sequential? all-links)
-          (map-indexed (fn [i l] (ui-link (assoc l :link/position (inc i)))) all-links))))))
+          (map-indexed (fn [i l] (ui-link (om/computed l {:link/position (inc i)}))) all-links))))))
 
 (def top-links (om/factory TopLinks))
 
