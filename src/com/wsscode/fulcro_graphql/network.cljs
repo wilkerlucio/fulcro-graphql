@@ -50,7 +50,7 @@
                          [k (:result v)]
                          [k v]))))))
 
-(defn query [{::keys [url q]}]
+(defn query [{::keys [url q] :as input}]
   (go-catch
     (let [[res text] (-> (http #::{:url     url
                                    :method  "post"
@@ -59,7 +59,7 @@
                          <?)]
       (if (.-error res)
         (throw (ex-info (.-error res) {:query q}))
-        {::response-data (js/JSON.parse text)}))))
+        (assoc input ::response-data (js/JSON.parse text))))))
 
 (defrecord Network [url]
   fulcro.network/NetworkBehavior
