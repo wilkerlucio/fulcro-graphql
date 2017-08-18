@@ -1,14 +1,14 @@
 (ns com.wsscode.fulcro-graphql.network
   (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [cljs.core.async :refer [<! >! put! promise-chan]]
-            [common.async :refer-macros [<? go-catch]]
-            [fulcro.client.network :as fulcro.network]
-            [goog.events :as events]
-            [goog.string :as gstr]
-            [goog.object :as gobj]
-            [om.next :as om]
+            [com.wsscode.common.async :refer-macros [<? go-catch]]
             [com.wsscode.pathom.core :as p]
             [com.wsscode.pathom.graphql :as gql]
+            [fulcro.client.network :as fulcro.network]
+            [goog.events :as events]
+            [goog.object :as gobj]
+            [goog.string :as gstr]
+            [om.next :as om]
             [spec-coerce.core :as sc])
   (:import [goog.net XhrIo EventType]))
 

@@ -1,4 +1,4 @@
-(ns common.async
+(ns com.wsscode.common.async
   (:refer-clojure :exclude [map mapcat filter remove distinct concat take-while drop-while complement keep reduce])
   (:require-macros [cljs.core.async.macros :refer [go alt! go-loop]]
                    [common.async :refer [dochan go-catch <? <!expand]])

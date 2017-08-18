@@ -1,4 +1,4 @@
-(ns common.async
+(ns com.wsscode.common.async
   (:refer-clojure :exclude [test]))
 
 (defmacro dochan [[binding chan] & body]

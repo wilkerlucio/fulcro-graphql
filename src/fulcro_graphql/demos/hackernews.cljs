@@ -6,7 +6,7 @@
             [fulcro-css.css :as css]
             [fulcro-graphql.styles :as style]
             [com.wsscode.pathom.graphql :as gql]
-            [com.wsscode.fulcro-graphql.network :refer [graphql-network]]
+            [com.wsscode.fulcro-graphql.network :as gql.network :refer [graphql-network]]
             [om.dom :as dom]
             [om.next :as om])
   (:import [goog.Uri]))
@@ -229,3 +229,10 @@
        js/console.log))
 
 (css/upsert-css "hackernews" Root)
+
+(comment
+
+  (gql.network/query {::gql.network/url "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0"
+                      ::gql.network/q [{:link/all-links [:link/title :link/url]}]})
+
+  (println (gql/query->graphql [{:link/all-links [:link/title :link/url]}])))
