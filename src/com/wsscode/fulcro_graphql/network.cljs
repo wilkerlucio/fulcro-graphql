@@ -59,8 +59,7 @@
                          <?)]
       (if (.-error res)
         (throw (ex-info (.-error res) {:query q}))
-        (->> (parse {::p/entity (.-data (js/JSON.parse text))} q)
-             (lift-tempids))))))
+        {::response-data (js/JSON.parse text)}))))
 
 (defrecord Network [url]
   fulcro.network/NetworkBehavior
@@ -70,8 +69,10 @@
   (send [_ edn ok error]
     (go
       (try
-        (-> (query #::{:url url :q edn})
-            <? ok)
+        (let [json (-> (query #::{:url url :q edn}) <? ::response-data)]
+          (ok (-> (parse {::p/entity (.-data json)} edn)
+                  (lift-tempids))))
+
         (catch :default e
           (js/console.log "Network error" e)
           (error e)))))
