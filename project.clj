@@ -12,7 +12,7 @@
                  [figwheel-sidecar "0.5.11"]
                  [binaryage/devtools "0.9.4"]
                  [spec-coerce "1.0.0-alpha5"]
-                 [com.wsscode/pathom "1.0.0-beta6"]]
+                 [com.wsscode/pathom "1.0.0-beta7-SNAPSHOT"]]
 
   :cljsbuild {:builds [{:id           "site"
                         :figwheel     true
