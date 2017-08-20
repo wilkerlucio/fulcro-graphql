@@ -1,7 +1,7 @@
 (ns com.wsscode.common.async
   (:refer-clojure :exclude [map mapcat filter remove distinct concat take-while drop-while complement keep reduce])
   (:require-macros [cljs.core.async.macros :refer [go alt! go-loop]]
-                   [common.async :refer [dochan go-catch <? <!expand]])
+                   [com.wsscode.common.async :refer [dochan go-catch <? <!expand]])
   (:require [goog.events :as events]
             [cljs.core.async :refer [>! <! chan put! close! alts! promise-chan] :as async]))
 

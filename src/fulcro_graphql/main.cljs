@@ -2,5 +2,5 @@
   (:require [fulcro-graphql.demos.github :as demos.github]
             [fulcro-graphql.demos.hackernews :as demos.hackernews]))
 
-(demos.hackernews/init)
-#_ (demos.github/init)
+#_ (demos.hackernews/init)
+(demos.github/init)

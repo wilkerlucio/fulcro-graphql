@@ -12,7 +12,7 @@
            :done)))))
 
 (defmacro <? [ch]
-  `(common.async/throw-err (cljs.core.async/<! ~ch)))
+  `(com.wsscode.common.async/throw-err (cljs.core.async/<! ~ch)))
 
 (defmacro go-catch [& body]
   `(cljs.core.async.macros/go
@@ -21,7 +21,7 @@
        (catch :default e# e#))))
 
 (defmacro <!expand [value]
-  `(cljs.core.async/<! (common.async/expand-value ~value)))
+  `(cljs.core.async/<! (com.wsscode.common.async/expand-value ~value)))
 
 (defmacro <!cache [cache key & body]
   `(if-let [[_ v#] (find (deref ~cache) ~key)]

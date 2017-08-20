@@ -5,10 +5,18 @@
             [fulcro.client.mutations :as fm]
             [fulcro-css.css :as css]
             [fulcro-graphql.styles :as style]
+            [com.wsscode.common.local-storage :as local-storage]
             [com.wsscode.pathom.graphql :as gql]
             [com.wsscode.fulcro-graphql.network :as gn :refer [graphql-network]]
             [om.dom :as dom]
             [om.next :as om]))
+
+(defn get-token []
+  (if-let [token (local-storage/get "github-token")]
+    token
+    (let [token (js/prompt "Please enter github token:")]
+      (local-storage/set! "github-token" token)
+      token)))
 
 (defn get-load-query [comp]
   (conj (om/get-query comp) :ui/fetch-state))
@@ -94,7 +102,7 @@
                               (om/transact! reconciler `[(~'fulcro/load {:query   ~(om/focus-query (om/get-query Root) [:github/user])
                                                                          :marker  true
                                                                          :refresh [:github/user]})]))
-          :networking (graphql-network "https://api.github.com/graphql?access_token="))))
+          :networking (graphql-network (str "https://api.github.com/graphql?access_token=" (get-token))))))
 
 (defn init []
   (swap! app fulcro/mount Root "gh-app-container"))
