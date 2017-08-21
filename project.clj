@@ -8,7 +8,7 @@
                  [org.clojure/core.async "0.3.443"]
                  [fulcrologic/fulcro "1.0.0-beta8"]
                  [fulcrologic/fulcro-css "1.0.0"]
-                 [org.omcljs/om "1.0.0-beta1"]
+                 [org.omcljs/om "1.0.0-beta2-SNAPSHOT"]
                  [figwheel-sidecar "0.5.11"]
                  [binaryage/devtools "0.9.4"]
                  [spec-coerce "1.0.0-alpha5"]

@@ -11,6 +11,7 @@
             [fulcro-graphql.styles :as style]
             [fulcro-css.css :as css]
             [fulcro.client.core :as fulcro]
+            [fulcro.client.mutations :as mutations :include-macros true]
             [fulcro.client.data-fetch :as fetch]
             [com.wsscode.common.local-storage :as local-storage]
             [fulcro.client.network :as fulcro.network]))
@@ -22,16 +23,59 @@
       (local-storage/set! "github-token" token)
       token)))
 
+(declare AddUserForm)
+
+(defmethod mutations/mutate `create-contact [{:keys [state ast]} _ {:contact/keys [id github] :as contact}]
+  {:remote
+   (assoc ast :params (select-keys contact [:contact/id :contact/github]))
+
+   :action
+   (fn []
+     (let [ref      [:Contact/by-id id]
+           new-user (fulcro/get-initial-state AddUserForm {})]
+       (swap! state (comp #(assoc-in % ref {:contact/id     id
+                                            :contact/github github})
+                          #(update-in % [:app/all-contacts] conj ref)
+                          #(assoc-in % [:Contact/by-id (:contact/id new-user)] new-user)
+                          #(assoc % :ui/new-user [:Contact/by-id (:contact/id new-user)])))))})
+
 (om/defui ^:once Contact
   static fulcro/InitialAppState
   (initial-state [_ _] {})
 
   static om/IQuery
-  (query [_] [:contact/id :contact/name :contact/github
+  (query [_] [:contact/id :contact/github
               {:contact/github-node [:github/avatar-url]}])
 
   static om/Ident
-  (ident [_ props] [:contact/by-id (:contact/id props)])
+  (ident [_ props] [:Contact/by-id (:contact/id props)])
+
+  static css/CSS
+  (local-rules [_] [[:.avatar {:width "100px" :height "100px"}]])
+  (include-children [_] [])
+
+  Object
+  (render [this]
+    (let [{:contact/keys [github github-node]} (om/props this)
+          css (css/get-classnames Contact)]
+      (dom/div nil
+        (dom/div nil
+          (dom/img #js {:className (:avatar css)
+                        :src       (:github/avatar-url github-node)}))
+        (dom/div nil github)))))
+
+(def contact (om/factory Contact))
+
+(om/defui ^:once AddUserForm
+  static fulcro/InitialAppState
+  (initial-state [_ _] {:contact/id     (om/tempid)
+                        :contact/github ""})
+
+  static om/IQuery
+  (query [_] [:contact/id :contact/github])
+
+  static om/Ident
+  (ident [_ props] [:Contact/by-id (:contact/id props)])
 
   static css/CSS
   (local-rules [_] [])
@@ -39,33 +83,48 @@
 
   Object
   (render [this]
-    (let [{:contact/keys [id name github github-node]} (om/props this)
-          css (css/get-classnames Contact)]
+    (let [{:keys [contact/github contact/id] :as props} (om/props this)
+          css (css/get-classnames AddUserForm)]
       (dom/div nil
-        (dom/div nil (dom/img #js {:src (:github/avatar-url github-node)}))
-        (dom/div nil id)
-        (dom/div nil name)
-        (dom/div nil github)
-        (dom/hr nil)))))
+        (dom/input #js {:type     "text"
+                        :value    github
+                        :onChange #(mutations/set-string! this :contact/github :event %)})
+        (dom/button #js {:onClick #(do
+                                     (om/transact! this [`(create-contact ~props)
+                                                         :ui/new-user
+                                                         :app/all-contacts])
+                                     (fetch/load this (om/get-ident this) Contact))}
+          "Add")))))
 
-(def contact (om/factory Contact))
+(def add-user-form (om/factory AddUserForm))
 
 (om/defui ^:once Root
   static fulcro/InitialAppState
-  (initial-state [_ _] {:ui/react-key (random-uuid)})
+  (initial-state [_ _] {:ui/react-key (random-uuid)
+                        :ui/new-user  (fulcro/get-initial-state AddUserForm {})})
 
   static om/IQuery
   (query [_] [{:app/all-contacts (om/get-query Contact)}
+              {:ui/new-user (om/get-query AddUserForm)}
               :ui/react-key])
 
+  static css/CSS
+  (local-rules [_] [[:.contacts {:display               "grid"
+                                 :grid-template-columns "repeat(5, 1fr)"}]])
+  (include-children [_] [Contact])
+
   static css/Global
-  (global-rules [_] [[:body {:background (style/color-white)}]])
+  (global-rules [_] [[:body {:background style/color-white}]])
 
   Object
   (render [this]
-    (let [{:keys [app/all-contacts ui/react-key]} (om/props this)]
+    (let [{:keys [app/all-contacts ui/react-key ui/new-user]} (om/props this)
+          css (css/get-classnames Root)]
       (dom/div #js {:key react-key}
-        (map contact all-contacts)))))
+        (add-user-form new-user)
+        (dom/hr nil)
+        (dom/div #js {:className (:contacts css)}
+          (map contact all-contacts))))))
 
 (declare composed-query)
 
@@ -87,17 +146,28 @@
   [{:keys [key union-key] :as ast} elision-set]
   (let [union-elision? (contains? elision-set union-key)]
     (when-not (or union-elision? (contains? elision-set key))
-      (update ast :children (fn [c] (vec (keep #(elide-ast-nodes % elision-set) c)))))))
+      (update ast :children (fn [c] (if c (vec (keep #(elide-ast-nodes % elision-set) c))))))))
+
+(defn ident-reader [{::gql/keys [ident-counter]
+                     :keys      [ast]
+                     :as        env}]
+  (if (vector? (:key ast))
+    (let [e (p/entity env)]
+      (pa/read-chan-values (p/join (gobj/get e (str "pathomId" (swap! ident-counter inc)))
+                                   env)))
+    ::p/continue))
 
 (defn composed-query [{::keys [url q attr-handler]}]
   (go
     (let [without (-> attr-handler methods keys set (disj :default))
           q'      (-> q om/query->ast (elide-ast-nodes without) om/ast->query)
           json    (-> (gn/query #::gn{:url url :q q'}) <! ::gn/response-data)]
-      (-> (gn/parse {::p/entity (.-data json)
-                     ::p/reader [pa/js-obj-reader attr-handler]} q)
+      (-> (gn/parse {::p/entity          (.-data json)
+                     ::gql/ident-counter (atom 0)
+                     ::p/reader          [pa/js-obj-reader attr-handler ident-reader]} q)
           (pa/read-chan-values)
-          <!))))
+          <!
+          (gn/lift-tempids)))))
 
 (defrecord Network [url]
   fulcro.network/NetworkBehavior
@@ -129,18 +199,37 @@
 (defn init []
   (swap! app fulcro/mount Root "app-container"))
 
+(css/upsert-css "demo-contacts" Root)
+
 (defn log-state []
   (->> @app :reconciler :config :state deref
        js/console.log))
 
 (comment
 
+  (println (gql/query->graphql `[(create-contact {:contact/id ~(om/tempid) :contact/github "bla"})]
+                               {::gql/js-name gn/js-name}))
+
+  (-> `[(create-contact {:contact/id ~(om/tempid) :contact/github "bla"})]
+      (om/query->ast)
+      (om/ast->query))
+
+  (-> `[{(create-contact {:contact/id ~(om/tempid), :contact/github "caioaao"}) [:ui]}]
+      (fulcro.client.impl.om-plumbing/strip-ui)
+      #_pr-str)
+
+  (-> `{:dispatch-key create-contact, :key create-contact, :params {:contact/id ~(om/tempid), :contact/github "ccc"}, :type :call
+        :children     [{:type :prop, :dispatch-key :id, :key :id}]}
+      (om/ast->query))
 
   (go
-    (-> #::{:q   [{:app/all-contacts
-                   [:contact/id :contact/name :contact/github
-                    {:contact/github-node [:user/bio :user/url]}]}]
-            :url "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5"}
+    (-> #::{:q            [{[:Contact/by-id "cj6l0c526011j012989kbdzhh"]
+                            [:contact/id :contact/github
+                             {:contact/github-node [:user/avatar-url]}]}
+                           {[:Contact/by-id "cj6l0cdch012b0186yf6wcmvw"]
+                            [:contact/id :contact/github]}]
+            :url          "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5"
+            :attr-handler attr-handler}
         composed-query <! js/console.log))
 
   (let [remotes (-> attr-handler methods keys set (disj :default))
