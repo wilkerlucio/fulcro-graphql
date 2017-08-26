@@ -41,6 +41,16 @@
                           #(assoc-in % [:Contact/by-id (:contact/id new-user)] new-user)
                           #(assoc-in % (conj group-ref :ui/new-contact) [:Contact/by-id (:contact/id new-user)])))))})
 
+(defmethod mutations/mutate `create-group [{:keys [state ast ref]} _ {:group/keys [id] :as group}]
+  {:remote
+   (assoc ast :params (select-keys group [:group/id :group/name]))
+
+   :action
+   (fn []
+     (let [group-ref [:Group/by-id id]]
+       (swap! state (comp #(update-in % (conj ref :app/all-groups) conj group-ref)
+                          #(assoc-in % group-ref group)))))})
+
 (defmethod mutations/mutate `select-group [{:keys [state reconciler ref]} _ {:keys [group/id]}]
   {:action
    (fn []
@@ -191,7 +201,7 @@
 
 (om/defui ^:once Contacts
   static fulcro/InitialAppState
-  (initial-state [_ _] {})
+  (initial-state [_ _] {:app/all-groups []})
 
   static om/IQuery
   (query [_] [{:app/all-groups (om/get-query GroupItem)}
@@ -217,7 +227,11 @@
           (map (comp group-item
                      #(om/computed % {:ui/selected?    (= (:group/id selected-group) (:group/id %))
                                       :event/on-select (fn [group] (om/transact! this [`(select-group ~group)]))}))
-               all-groups))
+               all-groups)
+
+          (dom/button #js {:onClick #(if-let [name (js/prompt "New group name")]
+                                       (om/transact! this [`(create-group {:group/id ~(om/tempid)
+                                                                           :group/name ~name})]))} "+"))
         (dom/div #js {:className "flex-expand"}
           (if selected-group
             (group-view selected-group)
