@@ -23,19 +23,36 @@
       (local-storage/set! "github-token" token)
       token)))
 
-(declare AddUserForm)
+(declare AddUserForm GroupView)
 
-(defmethod mutations/mutate `create-contact [{:keys [state ast]} _ {:contact/keys [id github] :as contact}]
+(defmethod mutations/mutate `add-to-group-on-contact [_ _ _]
+  {:remote true})
+
+(defmethod mutations/mutate `create-contact [{:keys [state ast]} _ {:contact/keys [id group-id] :as contact}]
   {:remote
    (assoc ast :params (select-keys contact [:contact/id :contact/github]))
 
    :action
    (fn []
-     (let [ref      [:Contact/by-id id]
-           new-user (fulcro/get-initial-state AddUserForm {})]
-       (swap! state (comp #(update-in % [:app/all-contacts] conj ref)
+     (let [ref       [:Contact/by-id id]
+           group-ref [:Group/by-id group-id]
+           new-user  (fulcro/get-initial-state AddUserForm {})]
+       (swap! state (comp #(update-in % (conj group-ref :group/contacts) conj ref)
                           #(assoc-in % [:Contact/by-id (:contact/id new-user)] new-user)
-                          #(assoc % :ui/new-user [:Contact/by-id (:contact/id new-user)])))))})
+                          #(assoc-in % (conj group-ref :ui/new-contact) [:Contact/by-id (:contact/id new-user)])))))})
+
+(defmethod mutations/mutate `select-group [{:keys [state reconciler ref]} _ {:keys [group/id]}]
+  {:action
+   (fn []
+     (if-not (get-in @state [:Group/by-id id :ui/new-contact])
+       (let [new-user    (fulcro/get-initial-state AddUserForm {})
+             contact-ref [:Contact/by-id (:contact/id new-user)]]
+         (swap! state (comp #(assoc-in % [:Group/by-id id :ui/new-contact] contact-ref)
+                            #(assoc-in % contact-ref new-user)))))
+
+     (fetch/load reconciler [:Group/by-id id] GroupView {:without #{:ui/new-contact}})
+
+     (swap! state assoc-in (conj ref :app/selected-group) [:Group/by-id id]))})
 
 (defn not-found [x default]
   (if (= x :fulcro.client.impl.om-plumbing/not-found)
@@ -67,11 +84,7 @@
           (dom/img #js {:className (:avatar css)
                         :src       (:github/avatar-url github-node)}))
         (dom/div nil github)
-        (dom/div nil (not-found (:github/name github-node) ""))
-        #_#_(dom/div nil (:github/company github-node))
-            (dom/div nil
-              (for [{:keys [url]} (get-in github-node [:github/repositories :nodes])]
-                (dom/div nil "Repo: " url)))))))
+        (dom/div nil (not-found (:github/name github-node) ""))))))
 
 (def contact (om/factory Contact))
 
@@ -93,16 +106,25 @@
   Object
   (render [this]
     (let [{:keys [contact/github] :as props} (om/props this)
+          {:keys [group/id]} (om/get-computed props)
           css (css/get-classnames AddUserForm)]
       (dom/div nil
-        (dom/input #js {:type     "text"
-                        :value    github
-                        :onChange #(mutations/set-string! this :contact/github :event %)})
+        (dom/input #js {:type        "text"
+                        :value       github
+                        :placeholder "Github user name"
+                        :onChange    #(mutations/set-string! this :contact/github :event %)})
         (dom/button #js {:onClick #(do
-                                     (om/transact! this [`(create-contact ~props)
+                                     (om/transact! this [`(create-contact ~(assoc props :contact/group-id id))
                                                          :ui/new-user
-                                                         :app/all-contacts])
-                                     (fetch/load this (om/get-ident this) Contact))}
+                                                         :group/contacts])
+                                     (fetch/load this (om/get-ident this) Contact)
+                                     (js/setTimeout
+                                       (fn []
+                                         (om/transact! this [`(add-to-group-on-contact {:contacts-contact-id ~(:contact/id props)
+                                                                                        :groups-group-id     ~id
+                                                                                        ::gql/mutate-join    [{:contacts-contact [:id]}
+                                                                                                              {:groups-group [:id]}]})]))
+                                       10))}
           "Add")))))
 
 (def add-user-form (om/factory AddUserForm))
@@ -112,22 +134,29 @@
   (initial-state [_ _] {})
 
   static om/IQuery
-  (query [_] [:group/id :group/name {:group/contacts (om/get-query Contact)}])
+  (query [_] [:group/id :group/name
+              {:group/contacts (om/get-query Contact)}
+              {:ui/new-contact (om/get-query AddUserForm)}])
 
   static om/Ident
   (ident [_ props] [:Group/by-id (:group/id props)])
 
   static css/CSS
   (local-rules [_] [[:.contacts {:display               "grid"
-                                 :grid-template-columns "repeat(5, 1fr)"}]])
-  (include-children [_] [Contact])
+                                 :grid-template-columns "repeat(5, 1fr)"}]
+                    [:.title {:font-size   "14px"
+                              :font-weight "bold"}]])
+  (include-children [_] [Contact AddUserForm])
 
   Object
   (render [this]
-    (let [{:group/keys [name contacts]} (om/props this)
+    (let [{:group/keys [name contacts]
+           :ui/keys    [new-contact]
+           :as         props} (om/props this)
           css (css/get-classnames GroupView)]
       (dom/div nil
-        (str name)
+        (dom/div #js {:className (:title css)} (str name))
+        (add-user-form (om/computed new-contact props))
         (dom/div #js {:className (:contacts css)}
           (map contact contacts))))))
 
@@ -187,9 +216,7 @@
         (dom/div nil
           (map (comp group-item
                      #(om/computed % {:ui/selected?    (= (:group/id selected-group) (:group/id %))
-                                      :event/on-select (fn [{:keys [group/id]}]
-                                                         (fetch/load this [:Group/by-id id] GroupView)
-                                                         (mutations/set-value! this :app/selected-group [:Group/by-id id]))}))
+                                      :event/on-select (fn [group] (om/transact! this [`(select-group ~group)]))}))
                all-groups))
         (dom/div #js {:className "flex-expand"}
           (if selected-group
