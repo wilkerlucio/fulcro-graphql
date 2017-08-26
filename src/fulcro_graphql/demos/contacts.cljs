@@ -25,8 +25,10 @@
 
 (declare AddUserForm GroupView)
 
-(defmethod mutations/mutate `add-to-group-on-contact [_ _ _]
-  {:remote true})
+(defmethod mutations/mutate `add-to-group-on-contact [{:keys [ast]} _ params]
+  {:remote
+   (assoc ast :params (assoc params ::gql/mutate-join [{:contacts-contact [:id]}
+                                                       {:groups-group [:id]}]))})
 
 (defmethod mutations/mutate `create-contact [{:keys [state ast]} _ {:contact/keys [id group-id] :as contact}]
   {:remote
@@ -50,6 +52,16 @@
      (let [group-ref [:Group/by-id id]]
        (swap! state (comp #(update-in % (conj ref :app/all-groups) conj group-ref)
                           #(assoc-in % group-ref group)))))})
+
+(defmethod mutations/mutate `update-group [{:keys [state ast]} _ {:group/keys [id] :as group}]
+  {:remote
+   (assoc ast :params (-> (select-keys group [:group/id :group/name])
+                          (assoc ::gql/mutate-join [:id])))
+
+   :action
+   (fn []
+     (let [group-ref [:Group/by-id id]]
+       (swap! state assoc-in group-ref group)))})
 
 (defmethod mutations/mutate `select-group [{:keys [state reconciler ref]} _ {:keys [group/id]}]
   {:action
@@ -131,9 +143,7 @@
                                      (js/setTimeout
                                        (fn []
                                          (om/transact! this [`(add-to-group-on-contact {:contacts-contact-id ~(:contact/id props)
-                                                                                        :groups-group-id     ~id
-                                                                                        ::gql/mutate-join    [{:contacts-contact [:id]}
-                                                                                                              {:groups-group [:id]}]})]))
+                                                                                        :groups-group-id     ~id})]))
                                        10))}
           "Add")))))
 
@@ -155,7 +165,8 @@
   (local-rules [_] [[:.contacts {:display               "grid"
                                  :grid-template-columns "repeat(5, 1fr)"}]
                     [:.title {:font-size   "14px"
-                              :font-weight "bold"}]])
+                              :font-weight "bold"
+                              :cursor      "pointer"}]])
   (include-children [_] [Contact AddUserForm])
 
   Object
@@ -165,7 +176,10 @@
            :as         props} (om/props this)
           css (css/get-classnames GroupView)]
       (dom/div nil
-        (dom/div #js {:className (:title css)} (str name))
+        (dom/div #js {:className (:title css)}
+          (dom/a #js {:onClick #(if-let [new-name (js/prompt "New group name")]
+                                  (om/transact! this [`(update-group ~(assoc props :group/name new-name))]))}
+            (str name)))
         (add-user-form (om/computed new-contact props))
         (dom/div #js {:className (:contacts css)}
           (map contact contacts))))))
@@ -230,7 +244,7 @@
                all-groups)
 
           (dom/button #js {:onClick #(if-let [name (js/prompt "New group name")]
-                                       (om/transact! this [`(create-group {:group/id ~(om/tempid)
+                                       (om/transact! this [`(create-group {:group/id   ~(om/tempid)
                                                                            :group/name ~name})]))} "+"))
         (dom/div #js {:className "flex-expand"}
           (if selected-group
