@@ -33,11 +33,13 @@
    (fn []
      (let [ref      [:Contact/by-id id]
            new-user (fulcro/get-initial-state AddUserForm {})]
-       (swap! state (comp #(assoc-in % ref {:contact/id     id
-                                            :contact/github github})
-                          #(update-in % [:app/all-contacts] conj ref)
+       (swap! state (comp #(update-in % [:app/all-contacts] conj ref)
                           #(assoc-in % [:Contact/by-id (:contact/id new-user)] new-user)
                           #(assoc % :ui/new-user [:Contact/by-id (:contact/id new-user)])))))})
+
+(defn not-found [x default]
+  (if (= x :fulcro.client.impl.om-plumbing/not-found)
+    default x))
 
 (om/defui ^:once Contact
   static fulcro/InitialAppState
@@ -45,7 +47,9 @@
 
   static om/IQuery
   (query [_] [:contact/id :contact/github
-              {:contact/github-node [:github/avatar-url]}])
+              {:contact/github-node
+               [:github/avatar-url :github/name :github/company
+                '({:github/repositories [{:nodes [:url]}]} {:last 5})]}])
 
   static om/Ident
   (ident [_ props] [:Contact/by-id (:contact/id props)])
@@ -62,7 +66,12 @@
         (dom/div nil
           (dom/img #js {:className (:avatar css)
                         :src       (:github/avatar-url github-node)}))
-        (dom/div nil github)))))
+        (dom/div nil github)
+        (dom/div nil (not-found (:github/name github-node) ""))
+        #_#_(dom/div nil (:github/company github-node))
+            (dom/div nil
+              (for [{:keys [url]} (get-in github-node [:github/repositories :nodes])]
+                (dom/div nil "Repo: " url)))))))
 
 (def contact (om/factory Contact))
 
@@ -83,7 +92,7 @@
 
   Object
   (render [this]
-    (let [{:keys [contact/github contact/id] :as props} (om/props this)
+    (let [{:keys [contact/github] :as props} (om/props this)
           css (css/get-classnames AddUserForm)]
       (dom/div nil
         (dom/input #js {:type     "text"
@@ -98,35 +107,132 @@
 
 (def add-user-form (om/factory AddUserForm))
 
-(om/defui ^:once Root
+(om/defui ^:once GroupView
   static fulcro/InitialAppState
-  (initial-state [_ _] {:ui/react-key (random-uuid)
-                        :ui/new-user  (fulcro/get-initial-state AddUserForm {})})
+  (initial-state [_ _] {})
 
   static om/IQuery
-  (query [_] [{:app/all-contacts (om/get-query Contact)}
-              {:ui/new-user (om/get-query AddUserForm)}
-              :ui/react-key])
+  (query [_] [:group/id :group/name {:group/contacts (om/get-query Contact)}])
+
+  static om/Ident
+  (ident [_ props] [:Group/by-id (:group/id props)])
 
   static css/CSS
   (local-rules [_] [[:.contacts {:display               "grid"
                                  :grid-template-columns "repeat(5, 1fr)"}]])
   (include-children [_] [Contact])
 
-  static css/Global
-  (global-rules [_] [[:body {:background style/color-white}]])
+  Object
+  (render [this]
+    (let [{:group/keys [name contacts]} (om/props this)
+          css (css/get-classnames GroupView)]
+      (dom/div nil
+        (str name)
+        (dom/div #js {:className (:contacts css)}
+          (map contact contacts))))))
+
+(def group-view (om/factory GroupView))
+
+(om/defui ^:once GroupItem
+  static fulcro/InitialAppState
+  (initial-state [_ _] {:group/id   (om/tempid)
+                        :group/name ""})
+
+  static om/IQuery
+  (query [_] [:group/id :group/name])
+
+  static om/Ident
+  (ident [_ props] [:Group/by-id (:group/id props)])
+
+  static css/CSS
+  (local-rules [_] [[:.container {:cursor "pointer"}]
+                    [:.selected {:background "#ccc"}]])
+  (include-children [_] [])
 
   Object
   (render [this]
-    (let [{:keys [app/all-contacts ui/react-key ui/new-user]} (om/props this)
-          css (css/get-classnames Root)]
+    (let [{:group/keys [name] :as props} (om/props this)
+          {:keys [event/on-select ui/selected?]} (om/get-computed props)
+          css (css/get-classnames GroupItem)]
+      (dom/div #js {:onClick   #(on-select props)
+                    :className (cond-> (:container css)
+                                 selected? (str " " (:selected css)))} name))))
+
+(def group-item (om/factory GroupItem))
+
+(om/defui ^:once Contacts
+  static fulcro/InitialAppState
+  (initial-state [_ _] {})
+
+  static om/IQuery
+  (query [_] [{:app/all-groups (om/get-query GroupItem)}
+              {:app/selected-group (om/get-query GroupView)}])
+
+  static om/Ident
+  (ident [_ props] [:contact-app/instance "main"])
+
+  static css/CSS
+  (local-rules [_] [[:.container {:display "flex"}]])
+  (include-children [_] [GroupItem GroupView])
+
+  static css/Global
+  (global-rules [_] [[:body {:background style/color-white}]
+                     [:.flex-expand {:flex "1"}]])
+
+  Object
+  (render [this]
+    (let [{:keys [app/all-groups app/selected-group]} (om/props this)
+          css (css/get-classnames Contacts)]
+      (dom/div #js {:className (:container css)}
+        (dom/div nil
+          (map (comp group-item
+                     #(om/computed % {:ui/selected?    (= (:group/id selected-group) (:group/id %))
+                                      :event/on-select (fn [{:keys [group/id]}]
+                                                         (fetch/load this [:Group/by-id id] GroupView)
+                                                         (mutations/set-value! this :app/selected-group [:Group/by-id id]))}))
+               all-groups))
+        (dom/div #js {:className "flex-expand"}
+          (if selected-group
+            (group-view selected-group)
+            "No group selected"))))))
+
+(def contacts-ui (om/factory Contacts))
+
+(om/defui ^:once Root
+  static fulcro/InitialAppState
+  (initial-state [_ _] {:ui/react-key (random-uuid)
+                        :app/contacts (fulcro/get-initial-state Contacts {})})
+
+  static om/IQuery
+  (query [_] [{:app/contacts (om/get-query Contacts)}
+              :ui/react-key])
+
+  static css/CSS
+  (local-rules [_] [])
+  (include-children [_] [Contacts])
+
+  Object
+  (render [this]
+    (let [{:keys [ui/react-key app/contacts]} (om/props this)]
       (dom/div #js {:key react-key}
-        (add-user-form new-user)
-        (dom/hr nil)
-        (dom/div #js {:className (:contacts css)}
-          (map contact all-contacts))))))
+        (contacts-ui contacts)))))
 
 (declare composed-query)
+
+(defn elide-ast-nodes
+  "Remove items from a query (AST) that have a key listed in the elision-set"
+  [{:keys [key union-key] :as ast} elision-set]
+  (let [union-elision? (contains? elision-set union-key)]
+    (when-not (or union-elision? (contains? elision-set key))
+      (update ast :children (fn [c] (if c (vec (keep #(elide-ast-nodes % elision-set) c))))))))
+
+(defn ident-reader [{:keys [ast]
+                     :as   env}]
+  (if (vector? (:key ast))
+    (let [e (p/entity env)]
+      (pa/read-chan-values (p/join (gobj/get e (gql/ident->alias (:key ast)))
+                                   env)))
+    ::p/continue))
 
 (defmulti attr-handler p/key-dispatch)
 
@@ -141,30 +247,13 @@
                               :attr-handler attr-handler})
           <! :github/user))))
 
-(defn elide-ast-nodes
-  "Remove items from a query (AST) that have a key listed in the elision-set"
-  [{:keys [key union-key] :as ast} elision-set]
-  (let [union-elision? (contains? elision-set union-key)]
-    (when-not (or union-elision? (contains? elision-set key))
-      (update ast :children (fn [c] (if c (vec (keep #(elide-ast-nodes % elision-set) c))))))))
-
-(defn ident-reader [{::gql/keys [ident-counter]
-                     :keys      [ast]
-                     :as        env}]
-  (if (vector? (:key ast))
-    (let [e (p/entity env)]
-      (pa/read-chan-values (p/join (gobj/get e (str "pathomId" (swap! ident-counter inc)))
-                                   env)))
-    ::p/continue))
-
 (defn composed-query [{::keys [url q attr-handler]}]
   (go
     (let [without (-> attr-handler methods keys set (disj :default))
           q'      (-> q om/query->ast (elide-ast-nodes without) om/ast->query)
           json    (-> (gn/query #::gn{:url url :q q'}) <! ::gn/response-data)]
-      (-> (gn/parse {::p/entity          (.-data json)
-                     ::gql/ident-counter (atom 0)
-                     ::p/reader          [pa/js-obj-reader attr-handler ident-reader]} q)
+      (-> (gn/parse {::p/entity (.-data json)
+                     ::p/reader [pa/js-obj-reader attr-handler ident-reader]} q)
           (pa/read-chan-values)
           <!
           (gn/lift-tempids)))))
@@ -190,10 +279,7 @@
 (defonce app
   (atom (fulcro/new-fulcro-client
           :started-callback (fn [{:keys [reconciler]}]
-                              (fetch/load reconciler :app/all-contacts Contact)
-                              #_(om/transact! reconciler `[(~'fulcro/load {:query   ~(om/focus-query (om/get-query Root) [:github/user])
-                                                                           :marker  true
-                                                                           :refresh [:github/user]})]))
+                              (fetch/load reconciler :app/all-groups GroupItem {:target [:contact-app/instance "main" :app/all-groups]}))
           :networking (graphql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5"))))
 
 (defn init []
@@ -223,6 +309,14 @@
       (om/ast->query))
 
   (go
+    (-> #::{:q            [{:app/all-contacts
+                            [:contact/id :contact/github
+                             {:contact/github-node [:user/avatar-url]}]}]
+            :url          "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5"
+            :attr-handler attr-handler}
+        composed-query <! js/console.log))
+
+  (go
     (-> #::{:q            [{[:Contact/by-id "cj6l0c526011j012989kbdzhh"]
                             [:contact/id :contact/github
                              {:contact/github-node [:user/avatar-url]}]}
@@ -237,5 +331,7 @@
                   [:contact/id :contact/name :contact/github
                    {:contact/github-node [:user/bio]}]}]]
     (-> q om/query->ast (elide-ast-nodes remotes) om/ast->query))
+
+  (gql/ident->alias [:Contact/by-id "cj6l0c526011j012989kbdzhh"])
 
   (om/get-query Root))
