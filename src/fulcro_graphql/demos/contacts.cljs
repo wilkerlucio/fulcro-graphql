@@ -94,14 +94,15 @@
   (ident [_ props] [:Contact/by-id (:contact/id props)])
 
   static css/CSS
-  (local-rules [_] [[:.avatar {:width "100px" :height "100px"}]])
+  (local-rules [_] [[:.container {:text-align "center"}]
+                    [:.avatar {:width "100px" :height "100px"}]])
   (include-children [_] [])
 
   Object
   (render [this]
     (let [{:contact/keys [github github-node]} (om/props this)
           css (css/get-classnames Contact)]
-      (dom/div nil
+      (dom/div #js {:className (:container css)}
         (dom/div nil
           (dom/img #js {:className (:avatar css)
                         :src       (:github/avatar-url github-node)}))
@@ -130,22 +131,26 @@
     (let [{:keys [contact/github] :as props} (om/props this)
           {:keys [group/id]} (om/get-computed props)
           css (css/get-classnames AddUserForm)]
-      (dom/div nil
-        (dom/input #js {:type        "text"
-                        :value       github
-                        :placeholder "Github user name"
-                        :onChange    #(mutations/set-string! this :contact/github :event %)})
-        (dom/button #js {:onClick #(do
-                                     (om/transact! this [`(create-contact ~(assoc props :contact/group-id id))
-                                                         :ui/new-user
-                                                         :group/contacts])
-                                     (fetch/load this (om/get-ident this) Contact)
-                                     (js/setTimeout
-                                       (fn []
-                                         (om/transact! this [`(add-to-group-on-contact {:contacts-contact-id ~(:contact/id props)
-                                                                                        :groups-group-id     ~id})]))
-                                       10))}
-          "Add")))))
+      (dom/form #js {:className "form-row align-items-center"}
+        (dom/div #js {:className "col-auto"}
+          (dom/input #js {:type        "text"
+                          :value       github
+                          :placeholder "Github user name"
+                          :className   "form-control"
+                          :onChange    #(mutations/set-string! this :contact/github :event %)}))
+        (dom/div #js {:className "col-auto"}
+          (dom/button #js {:className "btn btn-primary"
+                           :onClick #(do
+                                       (om/transact! this [`(create-contact ~(assoc props :contact/group-id id))
+                                                           :ui/new-user
+                                                           :group/contacts])
+                                       (fetch/load this (om/get-ident this) Contact)
+                                       (js/setTimeout
+                                         (fn []
+                                           (om/transact! this [`(add-to-group-on-contact {:contacts-contact-id ~(:contact/id props)
+                                                                                          :groups-group-id     ~id})]))
+                                         10))}
+            "Add"))))))
 
 (def add-user-form (om/factory AddUserForm))
 
@@ -163,10 +168,10 @@
 
   static css/CSS
   (local-rules [_] [[:.contacts {:display               "grid"
-                                 :grid-template-columns "repeat(5, 1fr)"}]
-                    [:.title {:font-size   "14px"
-                              :font-weight "bold"
-                              :cursor      "pointer"}]])
+                                 :grid-template-columns "repeat(5, 1fr)"
+                                 :justify-items         "center"
+                                 :grid-gap              "26px"}]
+                    [:.title {:cursor      "pointer"}]])
   (include-children [_] [Contact AddUserForm])
 
   Object
@@ -176,13 +181,15 @@
            :as         props} (om/props this)
           css (css/get-classnames GroupView)]
       (dom/div nil
-        (dom/div #js {:className (:title css)}
-          (dom/a #js {:onClick #(if-let [new-name (js/prompt "New group name")]
+        (dom/h1 #js {:className (:title css)}
+          (dom/a #js {:onClick #(if-let [new-name (js/prompt "New group name" name)]
                                   (om/transact! this [`(update-group ~(assoc props :group/name new-name))]))}
             (str name)))
         (add-user-form (om/computed new-contact props))
         (dom/div #js {:className (:contacts css)}
-          (map contact contacts))))))
+          (->> contacts
+               (sort-by :contact/github)
+               (map contact)))))))
 
 (def group-view (om/factory GroupView))
 
@@ -225,7 +232,11 @@
   (ident [_ props] [:contact-app/instance "main"])
 
   static css/CSS
-  (local-rules [_] [[:.container {:display "flex"}]])
+  (local-rules [_] [[:.container {:display "grid"
+                                  :grid-template-columns "auto 1fr"
+                                  :grid-gap "20px"}]
+                    [:.group-menu {:padding "10px"}]
+                    [:.group-view {:flex "1"}]])
   (include-children [_] [GroupItem GroupView])
 
   static css/Global
@@ -237,16 +248,19 @@
     (let [{:keys [app/all-groups app/selected-group]} (om/props this)
           css (css/get-classnames Contacts)]
       (dom/div #js {:className (:container css)}
-        (dom/div nil
+        (dom/div #js {:className (:group-menu css)}
+          (dom/button #js {:className "btn btn-primary"
+                           :onClick #(if-let [name (js/prompt "New group name")]
+                                       (om/transact! this [`(create-group {:group/id   ~(om/tempid)
+                                                                           :group/name ~name})]))}
+            "New Group")
+          (dom/br nil)
+          (dom/br nil)
           (map (comp group-item
                      #(om/computed % {:ui/selected?    (= (:group/id selected-group) (:group/id %))
                                       :event/on-select (fn [group] (om/transact! this [`(select-group ~group)]))}))
-               all-groups)
-
-          (dom/button #js {:onClick #(if-let [name (js/prompt "New group name")]
-                                       (om/transact! this [`(create-group {:group/id   ~(om/tempid)
-                                                                           :group/name ~name})]))} "+"))
-        (dom/div #js {:className "flex-expand"}
+               (sort-by :group/name all-groups)))
+        (dom/div #js {:className (:group-view css)}
           (if selected-group
             (group-view selected-group)
             "No group selected"))))))
