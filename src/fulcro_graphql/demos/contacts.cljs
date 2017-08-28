@@ -72,7 +72,7 @@
          (swap! state (comp #(assoc-in % [:Group/by-id id :ui/new-contact] contact-ref)
                             #(assoc-in % contact-ref new-user)))))
 
-     (fetch/load reconciler [:Group/by-id id] GroupView {:without #{:ui/new-contact}})
+     (fetch/load reconciler [:Group/by-id id] GroupView)
 
      (swap! state assoc-in (conj ref :app/selected-group) [:Group/by-id id]))})
 
