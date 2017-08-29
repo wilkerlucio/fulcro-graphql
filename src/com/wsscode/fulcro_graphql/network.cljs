@@ -15,6 +15,17 @@
 (defn js-name [s]
   (gstr/toCamelCase (name s)))
 
+(defn debounce [f interval]
+  (let [timer (atom 0)
+        calls (atom [])]
+    (fn [& args]
+      (js/clearTimeout @timer)
+      (swap! calls conj args)
+      (reset! timer (js/setTimeout #(do
+                                      (f @calls)
+                                      (reset! calls []))
+                                   interval)))))
+
 (defn mutation [{::p/keys [entity js-key-transform]} key params]
   {:action
    (fn []
@@ -61,23 +72,42 @@
         (throw (ex-info (.-error res) {:query q}))
         (assoc input ::response-data (js/JSON.parse text))))))
 
-(defrecord Network [url]
+(defn network-send [{:keys [url]} edn ok error]
+  (go
+    (try
+      (let [json (-> (query #::{:url url :q edn}) <? ::response-data)]
+        (ok (-> (parse {::p/entity (.-data json)} edn)
+                (lift-tempids))))
+
+      (catch :default e
+        (js/console.log "Network error" e)
+        (error e)))))
+
+(defn merge-queries [qa qb]
+  (reduce (fn [full next]
+            (conj full next))
+          qa
+          qb))
+
+(defn batcher-send* [callback requests]
+  (let [edn (->> requests (map first) (reduce merge-queries))]
+    (callback [[edn
+                #(doseq [[_ ok _] requests] (ok %))
+                #(doseq [[_ _ err] requests] (err %))]])))
+
+(defn batcher-send
+  ([f] (batcher-send f 30))
+  ([f delay] (debounce (partial batcher-send* f) delay)))
+
+(defrecord Network [url send-fn]
   fulcro.network/NetworkBehavior
   (serialize-requests? [_] true)
 
   fulcro.network/FulcroNetwork
-  (send [_ edn ok error]
-    (go
-      (try
-        (let [json (-> (query #::{:url url :q edn}) <? ::response-data)]
-          (ok (-> (parse {::p/entity (.-data json)} edn)
-                  (lift-tempids))))
-
-        (catch :default e
-          (js/console.log "Network error" e)
-          (error e)))))
+  (send [this edn ok error] (send-fn this edn ok error))
 
   (start [_]))
 
 (defn graphql-network [url]
-  (map->Network {:url url}))
+  (map->Network {:url     url
+                 :send-fn network-send}))

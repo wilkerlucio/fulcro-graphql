@@ -14,7 +14,8 @@
             [fulcro.client.mutations :as mutations :include-macros true]
             [fulcro.client.data-fetch :as fetch]
             [com.wsscode.common.local-storage :as local-storage]
-            [fulcro.client.network :as fulcro.network]))
+            [fulcro.client.network :as fulcro.network]
+            [clojure.core.async :as async]))
 
 (defn get-token []
   (if-let [token (local-storage/get "github-token")]
@@ -86,7 +87,7 @@
 
   static om/IQuery
   (query [_] [:contact/id :contact/github
-              {:contact/github-node
+              {:contact/github-node2
                [:github/avatar-url :github/name :github/company :github/viewer-is-following]}])
 
   static om/Ident
@@ -99,19 +100,19 @@
 
   Object
   (render [this]
-    (let [{:contact/keys [github github-node]} (om/props this)
-          {:github/keys [viewer-is-following]} github-node
+    (let [{:contact/keys [github github-node2]} (om/props this)
+          {:github/keys [viewer-is-following avatar-url name company]} github-node2
           css (css/get-classnames Contact)]
       (dom/div #js {:className (:container css)}
         (dom/div nil
           (dom/img #js {:className (:avatar css)
-                        :src       (:github/avatar-url github-node)}))
+                        :src       avatar-url}))
         (if viewer-is-following
           (dom/button nil "Unfollow")
           (dom/button #js {:onClick #(om/transact! this `[])} "Follow"))
         (dom/div nil github)
-        (dom/div nil (not-found (:github/name github-node) ""))
-        (dom/div nil (not-found (:github/company github-node) ""))))))
+        (dom/div nil (not-found name ""))
+        (dom/div nil (not-found company ""))))))
 
 (def contact (om/factory Contact))
 
@@ -155,7 +156,7 @@
                           :onChange    #(mutations/set-string! this :contact/github :event %)}))
         (dom/div #js {:className "col-auto"}
           (dom/button #js {:className "btn btn-primary"
-                           :type "submit"}
+                           :type      "submit"}
             "Add"))))))
 
 (def add-user-form (om/factory AddUserForm))
@@ -177,7 +178,7 @@
                                  :grid-template-columns "repeat(5, 1fr)"
                                  :justify-items         "center"
                                  :grid-gap              "26px"}]
-                    [:.title {:cursor      "pointer"}]])
+                    [:.title {:cursor "pointer"}]])
   (include-children [_] [Contact AddUserForm])
 
   Object
@@ -188,9 +189,9 @@
           css (css/get-classnames GroupView)]
       (dom/div nil
         (dom/h1 #js {:className (:title css)}
-          (dom/a #js {:onClick #(if-let [new-name (js/prompt "New group name" name)]
-                                  (om/transact! this [`(update-group ~(assoc props :group/name new-name))]))}
-            (str name)))
+                (dom/a #js {:onClick #(if-let [new-name (js/prompt "New group name" name)]
+                                        (om/transact! this [`(update-group ~(assoc props :group/name new-name))]))}
+                  (str name)))
         (add-user-form (om/computed new-contact props))
         (dom/div #js {:className (:contacts css)}
           (->> contacts
@@ -238,9 +239,9 @@
   (ident [_ props] [:contact-app/instance "main"])
 
   static css/CSS
-  (local-rules [_] [[:.container {:display "grid"
+  (local-rules [_] [[:.container {:display               "grid"
                                   :grid-template-columns "auto 1fr"
-                                  :grid-gap "20px"}]
+                                  :grid-gap              "20px"}]
                     [:.group-menu {:padding "10px"}]
                     [:.group-view {:flex "1"}]])
   (include-children [_] [GroupItem GroupView])
@@ -256,9 +257,9 @@
       (dom/div #js {:className (:container css)}
         (dom/div #js {:className (:group-menu css)}
           (dom/button #js {:className "btn btn-primary"
-                           :onClick #(if-let [name (js/prompt "New group name")]
-                                       (om/transact! this [`(create-group {:group/id   ~(om/tempid)
-                                                                           :group/name ~name})]))}
+                           :onClick   #(if-let [name (js/prompt "New group name")]
+                                         (om/transact! this [`(create-group {:group/id   ~(om/tempid)
+                                                                             :group/name ~name})]))}
             "New Group")
           (dom/br nil)
           (dom/br nil)
@@ -322,41 +323,62 @@
                               :attr-handler attr-handler})
           <! :github/user))))
 
-(defn composed-query [{::keys [url q attr-handler]}]
+(defn join-remote [{::keys [app remote join-root]
+                    :keys [query]}]
+  (let [c (async/promise-chan)]
+    (go
+      (if-let [network (-> app :networking (get remote))]
+        (fulcro.network/send network [{join-root query}] #(async/put! c (get % join-root)) #(async/put! c %))
+        (do
+          (js/console.warn "Invalid remote" {:remote remote})
+          (async/close! c))))
+    c))
+
+(defmethod attr-handler :contact/github-node2 [{:keys [::p/entity] :as env}]
+  (let [github (gobj/get entity "github")]
+    (join-remote (assoc env ::join-root [:user/by-login github] ::remote :github))))
+
+(defn composed-query [{::keys [url q attr-handler app]}]
   (go
     (let [without (-> attr-handler methods keys set (disj :default))
           q'      (-> q om/query->ast (elide-ast-nodes without) om/ast->query)
           json    (-> (gn/query #::gn{:url url :q q'}) <! ::gn/response-data)]
       (-> (gn/parse {::p/entity (.-data json)
-                     ::p/reader [pa/js-obj-reader attr-handler ident-reader]} q)
+                     ::p/reader [pa/js-obj-reader attr-handler ident-reader]
+                     ::app      app} q)
           (pa/read-chan-values)
           <!
           (gn/lift-tempids)))))
 
-(defrecord Network [url]
+(defrecord Network [send-fn]
   fulcro.network/NetworkBehavior
   (serialize-requests? [_] true)
 
   fulcro.network/FulcroNetwork
-  (send [_ edn ok error]
-    (go
-      (try
-        (ok (<! (composed-query #::{:url url :q edn :attr-handler attr-handler})))
-        (catch :default e
-          (js/console.log "Network error" e)
-          (error e)))))
+  (send [_ edn ok error] (send-fn edn ok error))
 
   (start [_]))
 
-(defn graphql-network [url]
-  (map->Network {:url url}))
+(defn graphql-network [url app]
+  (let [send-fn (gn/batcher-send (fn [reqs]
+                                   (doseq [[edn ok error] reqs]
+                                     (go
+                                       (try
+                                         (ok (<! (composed-query #::{:url url :q edn :attr-handler attr-handler :app @app})))
+                                         (catch :default e
+                                           (js/console.log "Network error" e)
+                                           (error e)))))))]
+    (map->Network {:send-fn send-fn})))
 
-(defonce app
-  (atom (fulcro/new-fulcro-client
-          :started-callback (fn [{:keys [reconciler]}]
-                              (fetch/load reconciler :app/all-groups GroupItem {:target [:contact-app/instance "main" :app/all-groups]}))
-          :networking {:remote (graphql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5")
-                       :github (graphql-network (str "https://api.github.com/graphql?access_token=" (get-token)))})))
+(defonce app (atom nil))
+
+(defonce start-app
+  (reset! app
+          (fulcro/new-fulcro-client
+            :started-callback (fn [{:keys [reconciler]}]
+                                (fetch/load reconciler :app/all-groups GroupItem {:target [:contact-app/instance "main" :app/all-groups]}))
+            :networking {:remote (graphql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5" app)
+                         :github (graphql-network (str "https://api.github.com/graphql?access_token=" (get-token)) app)})))
 
 (defn init []
   (swap! app fulcro/mount Root "app-container"))
