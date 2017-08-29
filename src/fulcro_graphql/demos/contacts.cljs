@@ -135,7 +135,18 @@
     (let [{:keys [contact/github] :as props} (om/props this)
           {:keys [group/id]} (om/get-computed props)
           css (css/get-classnames AddUserForm)]
-      (dom/form #js {:className "form-row align-items-center"}
+      (dom/form #js {:className "form-row align-items-center"
+                     :onSubmit  (fn [e]
+                                  (.preventDefault e)
+                                  (om/transact! this [`(create-contact ~(assoc props :contact/group-id id))
+                                                      :ui/new-user
+                                                      :group/contacts])
+                                  (fetch/load this (om/get-ident this) Contact)
+                                  (js/setTimeout
+                                    (fn []
+                                      (om/transact! this [`(add-to-group-on-contact {:contacts-contact-id ~(:contact/id props)
+                                                                                     :groups-group-id     ~id})]))
+                                    10))}
         (dom/div #js {:className "col-auto"}
           (dom/input #js {:type        "text"
                           :value       github
@@ -144,16 +155,7 @@
                           :onChange    #(mutations/set-string! this :contact/github :event %)}))
         (dom/div #js {:className "col-auto"}
           (dom/button #js {:className "btn btn-primary"
-                           :onClick #(do
-                                       (om/transact! this [`(create-contact ~(assoc props :contact/group-id id))
-                                                           :ui/new-user
-                                                           :group/contacts])
-                                       (fetch/load this (om/get-ident this) Contact)
-                                       (js/setTimeout
-                                         (fn []
-                                           (om/transact! this [`(add-to-group-on-contact {:contacts-contact-id ~(:contact/id props)
-                                                                                          :groups-group-id     ~id})]))
-                                         10))}
+                           :type "submit"}
             "Add"))))))
 
 (def add-user-form (om/factory AddUserForm))
