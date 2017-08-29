@@ -87,8 +87,7 @@
   static om/IQuery
   (query [_] [:contact/id :contact/github
               {:contact/github-node
-               [:github/avatar-url :github/name :github/company
-                '({:github/repositories [{:nodes [:url]}]} {:last 5})]}])
+               [:github/avatar-url :github/name :github/company :github/viewer-is-following]}])
 
   static om/Ident
   (ident [_ props] [:Contact/by-id (:contact/id props)])
@@ -101,13 +100,18 @@
   Object
   (render [this]
     (let [{:contact/keys [github github-node]} (om/props this)
+          {:github/keys [viewer-is-following]} github-node
           css (css/get-classnames Contact)]
       (dom/div #js {:className (:container css)}
         (dom/div nil
           (dom/img #js {:className (:avatar css)
                         :src       (:github/avatar-url github-node)}))
+        (if viewer-is-following
+          (dom/button nil "Unfollow")
+          (dom/button #js {:onClick #(om/transact! this `[])} "Follow"))
         (dom/div nil github)
-        (dom/div nil (not-found (:github/name github-node) ""))))))
+        (dom/div nil (not-found (:github/name github-node) ""))
+        (dom/div nil (not-found (:github/company github-node) ""))))))
 
 (def contact (om/factory Contact))
 
@@ -349,7 +353,8 @@
   (atom (fulcro/new-fulcro-client
           :started-callback (fn [{:keys [reconciler]}]
                               (fetch/load reconciler :app/all-groups GroupItem {:target [:contact-app/instance "main" :app/all-groups]}))
-          :networking (graphql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5"))))
+          :networking {:remote (graphql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5")
+                       :github (graphql-network (str "https://api.github.com/graphql?access_token=" (get-token)))})))
 
 (defn init []
   (swap! app fulcro/mount Root "app-container"))
