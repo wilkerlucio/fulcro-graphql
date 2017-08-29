@@ -16,7 +16,8 @@
             [fulcro.client.data-fetch :as fetch]
             [com.wsscode.common.local-storage :as local-storage]
             [fulcro.client.network :as fulcro.network]
-            [clojure.core.async :as async]))
+            [clojure.core.async :as async]
+            [clojure.string :as str]))
 
 (defn get-token []
   (if-let [token (local-storage/get "github-token")]
@@ -170,14 +171,42 @@
 
 (def add-user-form (om/factory AddUserForm))
 
+(om/defui ^:once Repository
+  static fulcro/InitialAppState
+  (initial-state [_ _] {})
+
+  static om/IQuery
+  (query [_] [:repository/id :repository/name
+              {:repository/github
+               [:repository/name {:repository/owner [:github/login]}]}])
+
+  static om/Ident
+  (ident [_ props] [:Repository/by-id (:repository/id props)])
+
+  static css/CSS
+  (local-rules [_] [])
+  (include-children [_] [])
+
+  Object
+  (render [this]
+    (let [{:repository/keys [name github]} (om/props this)
+          css (css/get-classnames Repository)]
+      (dom/div nil
+        "REPO"
+        (dom/div nil name)
+        (dom/div nil (-> github :repository/owner :user/login (or "")))))))
+
+(def repository (om/factory Repository))
+
 (om/defui ^:once GroupView
   static fulcro/InitialAppState
   (initial-state [_ _] {})
 
   static om/IQuery
   (query [_] [:group/id :group/name
-              {:group/contacts (om/get-query Contact)}
-              {:ui/new-contact (om/get-query AddUserForm)}])
+              {:group/repositories (om/get-query Repository)}
+              #_ {:group/contacts (om/get-query Contact)}
+              #_ {:ui/new-contact (om/get-query AddUserForm)}])
 
   static om/Ident
   (ident [_ props] [:Group/by-id (:group/id props)])
@@ -188,11 +217,11 @@
                                  :justify-items         "center"
                                  :grid-gap              "26px"}]
                     [:.title {:cursor "pointer"}]])
-  (include-children [_] [Contact AddUserForm])
+  (include-children [_] [Contact AddUserForm Repository])
 
   Object
   (render [this]
-    (let [{:group/keys [name contacts]
+    (let [{:group/keys [name contacts repositories]
            :ui/keys    [new-contact]
            :as         props} (om/props this)
           css (css/get-classnames GroupView)]
@@ -201,15 +230,19 @@
                 (dom/a #js {:onClick #(if-let [new-name (js/prompt "New group name" name)]
                                         (om/transact! this [`(update-group ~(assoc props :group/name new-name))]))}
                   (str name)))
-        (add-user-form (om/computed new-contact props))
+        #_ (add-user-form (om/computed new-contact props))
         (dom/div #js {:className (:contacts css)}
+          (->> repositories
+               (sort-by :repository/name)
+               (map repository)))
+        #_ (dom/div #js {:className (:contacts css)}
           (->> contacts
                (sort-by :contact/github)
                (map contact)))))))
 
 (def group-view (om/factory GroupView))
 
-(om/defui ^:once GroupItem
+(om/defui ^:once GroupMenuItem
   static fulcro/InitialAppState
   (initial-state [_ _] {:group/id   (om/tempid)
                         :group/name ""})
@@ -229,19 +262,19 @@
   (render [this]
     (let [{:group/keys [name] :as props} (om/props this)
           {:keys [event/on-select ui/selected?]} (om/get-computed props)
-          css (css/get-classnames GroupItem)]
+          css (css/get-classnames GroupMenuItem)]
       (dom/div #js {:onClick   #(on-select props)
                     :className (cond-> (:container css)
                                  selected? (str " " (:selected css)))} name))))
 
-(def group-item (om/factory GroupItem))
+(def group-menu-item (om/factory GroupMenuItem))
 
 (om/defui ^:once Contacts
   static fulcro/InitialAppState
   (initial-state [_ _] {:app/all-groups []})
 
   static om/IQuery
-  (query [_] [{:app/all-groups (om/get-query GroupItem)}
+  (query [_] [{:app/all-groups (om/get-query GroupMenuItem)}
               {:app/selected-group (om/get-query GroupView)}])
 
   static om/Ident
@@ -253,7 +286,7 @@
                                   :grid-gap              "20px"}]
                     [:.group-menu {:padding "10px"}]
                     [:.group-view {:flex "1"}]])
-  (include-children [_] [GroupItem GroupView])
+  (include-children [_] [GroupMenuItem GroupView])
 
   static css/Global
   (global-rules [_] [[:body {:background style/color-white}]
@@ -272,7 +305,7 @@
             "New Group")
           (dom/br nil)
           (dom/br nil)
-          (map (comp group-item
+          (map (comp group-menu-item
                      #(om/computed % {:ui/selected?    (= (:group/id selected-group) (:group/id %))
                                       :event/on-select (fn [group] (om/transact! this [`(select-group ~group)]))}))
                (sort-by :group/name all-groups)))
@@ -338,6 +371,10 @@
   (let [github (gobj/get entity "github")]
     (join-remote (assoc env ::join-root [:user/by-login github] ::remote :github))))
 
+(defmethod attr-handler :repository/github [{:keys [::p/entity] :as env}]
+  (let [[owner name] (-> (gobj/get entity "name") (str/split #"/"))]
+    (join-remote (assoc env ::join-root [:github.repository/by-owner-and-name [owner name]] ::remote :github))))
+
 (defn composed-query [{::keys [url q attr-handler app]}]
   (go
     (let [without (-> attr-handler methods keys set (disj :default))
@@ -370,7 +407,7 @@
   (reset! app
           (fulcro/new-fulcro-client
             :started-callback (fn [{:keys [reconciler]}]
-                                (fetch/load reconciler :app/all-groups GroupItem {:target [:contact-app/instance "main" :app/all-groups]}))
+                                (fetch/load reconciler :app/all-groups GroupMenuItem {:target [:contact-app/instance "main" :app/all-groups]}))
             :networking {:remote (graphql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5" app)
                          :github (-> (graphql-network (str "https://api.github.com/graphql?access_token=" (get-token)) app)
                                      (batch-network))})))
