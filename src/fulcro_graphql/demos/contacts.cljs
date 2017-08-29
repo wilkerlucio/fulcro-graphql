@@ -7,6 +7,7 @@
             [com.wsscode.pathom.core :as p]
             [com.wsscode.pathom.async :as pa]
             [com.wsscode.pathom.graphql :as gql]
+            [com.wsscode.pathom.fulcro :refer [batch-network]]
             [com.wsscode.fulcro-graphql.network :as gn]
             [fulcro-graphql.styles :as style]
             [fulcro-css.css :as css]
@@ -350,25 +351,19 @@
           <!
           (gn/lift-tempids)))))
 
-(defrecord Network [send-fn]
+(defrecord Network [url app]
   fulcro.network/NetworkBehavior
   (serialize-requests? [_] true)
 
   fulcro.network/FulcroNetwork
-  (send [_ edn ok error] (send-fn edn ok error))
+  (send [_ edn ok error]
+    (go
+      (ok (<! (composed-query #::{:url url :q edn :attr-handler attr-handler :app @app})))))
 
   (start [_]))
 
 (defn graphql-network [url app]
-  (let [send-fn (gn/batcher-send (fn [reqs]
-                                   (doseq [[edn ok error] reqs]
-                                     (go
-                                       (try
-                                         (ok (<! (composed-query #::{:url url :q edn :attr-handler attr-handler :app @app})))
-                                         (catch :default e
-                                           (js/console.log "Network error" e)
-                                           (error e)))))))]
-    (map->Network {:send-fn send-fn})))
+  (batch-network (map->Network {:url url :app app})))
 
 (defonce app (atom nil))
 
