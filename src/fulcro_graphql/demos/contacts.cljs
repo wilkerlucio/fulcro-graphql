@@ -32,7 +32,7 @@
    (assoc ast :params (assoc params ::gql/mutate-join [{:contacts-contact [:id]}
                                                        {:groups-group [:id]}]))})
 
-(defmethod mutations/mutate `create-contact [{:keys [state ast]} _ {:contact/keys [id group-id] :as contact}]
+(defmethod mutations/mutate `create-contact [{:keys [state ast]} _ {:contact/keys [id group-id github] :as contact}]
   {:remote
    (assoc ast :params (select-keys contact [:contact/id :contact/github]))
 
@@ -42,6 +42,7 @@
            group-ref [:Group/by-id group-id]
            new-user  (fulcro/get-initial-state AddUserForm {})]
        (swap! state (comp #(update-in % (conj group-ref :group/contacts) conj ref)
+                          #(assoc-in % (conj ref :contact/github-node) [:github.user/by-login github])
                           #(assoc-in % [:Contact/by-id (:contact/id new-user)] new-user)
                           #(assoc-in % (conj group-ref :ui/new-contact) [:Contact/by-id (:contact/id new-user)])))))})
 
@@ -82,14 +83,20 @@
   (if (= x :fulcro.client.impl.om-plumbing/not-found)
     default x))
 
+(om/defui ^:once ContactGithubInfo
+  static om/IQuery
+  (query [_] [:github/login :github/avatar-url :github/name :github/company :github/viewer-is-following])
+
+  static om/Ident
+  (ident [_ props] [:github.user/by-login (:github/login props)]))
+
 (om/defui ^:once Contact
   static fulcro/InitialAppState
   (initial-state [_ _] {})
 
   static om/IQuery
   (query [_] [:contact/id :contact/github
-              {:contact/github-node
-               [:github/avatar-url :github/name :github/company :github/viewer-is-following]}])
+              {:contact/github-node (om/get-query ContactGithubInfo)}])
 
   static om/Ident
   (ident [_ props] [:Contact/by-id (:contact/id props)])
@@ -143,7 +150,8 @@
                                   (om/transact! this [`(create-contact ~(assoc props :contact/group-id id))
                                                       :ui/new-user
                                                       :group/contacts])
-                                  (fetch/load this (om/get-ident this) Contact)
+                                  (fetch/load this [:github.user/by-login github] ContactGithubInfo {:remote  :github
+                                                                                                     :refresh [:contact/github]})
                                   (js/setTimeout
                                     (fn []
                                       (om/transact! this [`(add-to-group-on-contact {:contacts-contact-id ~(:contact/id props)
@@ -316,7 +324,7 @@
 (defmethod attr-handler :default [_] ::p/continue)
 
 (defn join-remote [{::keys [app remote join-root]
-                    :keys [query]}]
+                    :keys  [query]}]
   (let [c (async/promise-chan)]
     (go
       (if-let [network (-> app :networking (get remote))]
@@ -377,6 +385,7 @@
        js/console.log))
 
 (comment
+  (gql/ident-transform [:github.user/by-login "wilker"])
 
   (println (gql/query->graphql `[(create-contact {:contact/id ~(om/tempid) :contact/github "bla"})]
                                {::gql/js-name gn/js-name}))
