@@ -88,7 +88,7 @@
 
   static om/IQuery
   (query [_] [:contact/id :contact/github
-              {:contact/github-node2
+              {:contact/github-node
                [:github/avatar-url :github/name :github/company :github/viewer-is-following]}])
 
   static om/Ident
@@ -101,8 +101,8 @@
 
   Object
   (render [this]
-    (let [{:contact/keys [github github-node2]} (om/props this)
-          {:github/keys [viewer-is-following avatar-url name company]} github-node2
+    (let [{:contact/keys [github github-node]} (om/props this)
+          {:github/keys [viewer-is-following avatar-url name company]} github-node
           css (css/get-classnames Contact)]
       (dom/div #js {:className (:container css)}
         (dom/div nil
@@ -315,15 +315,6 @@
 
 (defmethod attr-handler :default [_] ::p/continue)
 
-(defmethod attr-handler :contact/github-node [{:keys [query ::p/entity] :as env}]
-  (go
-    (let [github (gobj/get entity "github")
-          query  [(list {:github/user query} {:login github})]]
-      (-> (composed-query #::{:q            query
-                              :url          (str "https://api.github.com/graphql?access_token=" (get-token))
-                              :attr-handler attr-handler})
-          <! :github/user))))
-
 (defn join-remote [{::keys [app remote join-root]
                     :keys [query]}]
   (let [c (async/promise-chan)]
@@ -335,7 +326,7 @@
           (async/close! c))))
     c))
 
-(defmethod attr-handler :contact/github-node2 [{:keys [::p/entity] :as env}]
+(defmethod attr-handler :contact/github-node [{:keys [::p/entity] :as env}]
   (let [github (gobj/get entity "github")]
     (join-remote (assoc env ::join-root [:user/by-login github] ::remote :github))))
 
