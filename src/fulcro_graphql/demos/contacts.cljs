@@ -354,7 +354,7 @@
   (start [_]))
 
 (defn graphql-network [url app]
-  (batch-network (map->Network {:url url :app app})))
+  (map->Network {:url url :app app}))
 
 (defonce app (atom nil))
 
@@ -364,7 +364,8 @@
             :started-callback (fn [{:keys [reconciler]}]
                                 (fetch/load reconciler :app/all-groups GroupItem {:target [:contact-app/instance "main" :app/all-groups]}))
             :networking {:remote (graphql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5" app)
-                         :github (graphql-network (str "https://api.github.com/graphql?access_token=" (get-token)) app)})))
+                         :github (-> (graphql-network (str "https://api.github.com/graphql?access_token=" (get-token)) app)
+                                     (batch-network))})))
 
 (defn init []
   (swap! app fulcro/mount Root "app-container"))
