@@ -89,23 +89,12 @@
   (if (= x :fulcro.client.impl.om-plumbing/not-found)
     default x))
 
-(om/defui ^:once ContactGithubInfo
+(om/defui ^:once GithubUserView
   static om/IQuery
-  (query [_] [::g.user/login ::g.user/avatar-url ::g.user/name ::g.user/company ::g.user/viewer-is-following])
+  (query [_] [::g.user/login ::g.user/avatar-url])
 
   static om/Ident
-  (ident [_ props] [:github.user/by-login (::g.user/login props)]))
-
-(om/defui ^:once Contact
-  static fulcro/InitialAppState
-  (initial-state [_ _] {})
-
-  static om/IQuery
-  (query [_] [::c.contact/id ::c.contact/github
-              {::c.contact/github-user (om/get-query ContactGithubInfo)}])
-
-  static om/Ident
-  (ident [_ props] [:Contact/by-id (::c.contact/id props)])
+  (ident [_ props] [:github.user/by-login (::g.user/login props)])
 
   static css/CSS
   (local-rules [_] [[:.container {:text-align "center"}]
@@ -114,19 +103,36 @@
 
   Object
   (render [this]
-    (let [{::c.contact/keys [github github-node]} (om/props this)
-          {::g.user/keys [viewer-is-following avatar-url name company]} github-node
-          css (css/get-classnames Contact)]
+    (let [{::g.user/keys [avatar-url login]} (om/props this)
+          css (css/get-classnames GithubUserView)]
       (dom/div #js {:className (:container css)}
         (dom/div nil
           (dom/img #js {:className (:avatar css)
                         :src       avatar-url}))
-        (if viewer-is-following
-          (dom/button nil "Unfollow")
-          (dom/button #js {:onClick #(om/transact! this `[])} "Follow"))
-        (dom/div nil github)
-        (dom/div nil (not-found name ""))
-        (dom/div nil (not-found company ""))))))
+        (dom/div nil login)))))
+
+(def github-user-view (om/factory GithubUserView))
+
+(om/defui ^:once Contact
+  static fulcro/InitialAppState
+  (initial-state [_ _] {})
+
+  static om/IQuery
+  (query [_] [::c.contact/id ::c.contact/github
+              {::c.contact/github-user (om/get-query GithubUserView)}])
+
+  static om/Ident
+  (ident [_ props] [:Contact/by-id (::c.contact/id props)])
+
+  static css/CSS
+  (local-rules [_] [])
+  (include-children [_] [GithubUserView])
+
+  Object
+  (render [this]
+    (let [{::c.contact/keys [github-user]} (om/props this)
+          css (css/get-classnames Contact)]
+      (github-user-view github-user))))
 
 (def contact (om/factory Contact))
 
@@ -156,8 +162,8 @@
                                   (om/transact! this [`(create-contact ~(assoc props ::c.contact/group-id id))
                                                       :ui/new-user
                                                       ::c.group/contacts])
-                                  (fetch/load this [:github.user/by-login github] ContactGithubInfo {:remote  :github
-                                                                                                     :refresh [::c.contact/github]})
+                                  (fetch/load this [:github.user/by-login github] GithubUserView {:remote  :github
+                                                                                                  :refresh [::c.contact/github]})
                                   (js/setTimeout
                                     (fn []
                                       (om/transact! this [`(add-to-group-on-contact {:contacts-contact-id ~(::c.contact/id props)
@@ -183,10 +189,36 @@
   static om/IQuery
   (query [_] [::c.repository/id ::c.repository/name
               {::c.repository/github
-               [::g.repository/name {::g.repository/owner [::g.user/login]}]}])
+               [::g.repository/name {::g.repository/owner (om/get-query GithubUserView)}]}])
 
   static om/Ident
   (ident [_ props] [:Repository/by-id (::c.repository/id props)])
+
+  static css/CSS
+  (local-rules [_] [])
+  (include-children [_] [GithubUserView])
+
+  Object
+  (render [this]
+    (let [{::c.repository/keys [name github]} (om/props this)
+          css (css/get-classnames Repository)]
+      (dom/div nil
+        (dom/div nil name)
+        (github-user-view (-> github ::g.repository/owner))))))
+
+(def repository (om/factory Repository))
+
+(om/defui ^:once RepositoryToPick
+  static fulcro/InitialAppState
+  (initial-state [_ _] {})
+
+  static om/IQuery
+  (query [_] [::g.repository/name-with-owner ::g.repository/url])
+
+  static om/Ident
+  (ident [_ props]
+    (let [[owner name] (str/split (::g.repository/name-with-owner props) "/")]
+      [:github.repository/by-owner-and-name [owner name]]))
 
   static css/CSS
   (local-rules [_] [])
@@ -194,22 +226,45 @@
 
   Object
   (render [this]
-    (let [{::c.repository/keys [name github]} (om/props this)
-          css (css/get-classnames Repository)]
-      (dom/div nil
-        "REPO"
-        (dom/div nil name)
-        (dom/div nil (-> github ::g.repository/owner ::g.user/login (or "")))))))
+    (let [{::g.repository/keys [url]} (om/props this)
+          css (css/get-classnames RepositoryToPick)]
+      (dom/div nil url))))
 
-(def repository (om/factory Repository))
+(def repository-to-pick (om/factory RepositoryToPick))
+
+(om/defui ^:once GithubStarredReposPicker
+  static fulcro/InitialAppState
+  (initial-state [_ _] {})
+
+  static om/IQuery
+  (query [_] [::g.user/login
+              `({::g.user/starred-repositories [{:nodes ~(om/get-query RepositoryToPick)}]} {:last 10})])
+
+  static om/Ident
+  (ident [_ props] [:github.user/by-login (::g.user/login props)])
+
+  static css/CSS
+  (local-rules [_] [])
+  (include-children [_] [RepositoryToPick])
+
+  Object
+  (render [this]
+    (let [{::g.user/keys [starred-repositories] :as props} (om/props this)
+          css (css/get-classnames GithubStarredReposPicker)]
+      (dom/div nil
+        (dom/h2 nil "Add repository")
+        (->> starred-repositories :nodes (map repository-to-pick))))))
+
+(def github-starred-repos-picker (om/factory GithubStarredReposPicker))
 
 (om/defui ^:once GroupView
   static fulcro/InitialAppState
   (initial-state [_ _] {})
 
   static om/IQuery
-  (query [_] [::c.group/id ::c.group/name
+  (query [_] [::c.group/id ::c.group/name :ui/fetch-state
               {::c.group/repositories (om/get-query Repository)}
+              {:github.root/viewer (om/get-query GithubStarredReposPicker)}
               #_{::c.group/contacts (om/get-query Contact)}
               #_{:ui/new-contact (om/get-query AddUserForm)}])
 
@@ -222,13 +277,14 @@
                                  :justify-items         "center"
                                  :grid-gap              "26px"}]
                     [:.title {:cursor "pointer"}]])
-  (include-children [_] [Contact AddUserForm Repository])
+  (include-children [_] [Contact AddUserForm Repository GithubStarredReposPicker])
 
   Object
   (render [this]
     (let [{::c.group/keys [name contacts repositories]
-           :ui/keys    [new-contact]
-           :as         props} (om/props this)
+           :ui/keys       [new-contact fetch-state]
+           :keys          [github.root/viewer]
+           :as            props} (om/props this)
           css (css/get-classnames GroupView)]
       (dom/div nil
         (dom/h1 #js {:className (:title css)}
@@ -236,10 +292,13 @@
                                         (om/transact! this [`(update-group ~(assoc props ::c.group/name new-name))]))}
                   (str name)))
         #_(add-user-form (om/computed new-contact props))
+        (if (fetch/loading? fetch-state)
+          "Loading...")
         (dom/div #js {:className (:contacts css)}
           (->> repositories
                (sort-by ::c.repository/name)
                (map repository)))
+        (github-starred-repos-picker viewer)
         #_(dom/div #js {:className (:contacts css)}
             (->> contacts
                  (sort-by ::c.contact/github)
@@ -376,9 +435,16 @@
   (let [github (gobj/get entity "github")]
     (join-remote (assoc env ::join-root [:user/by-login github] ::remote :github))))
 
+(defmethod attr-handler ::g.user/contact [{:keys [::p/entity] :as env}]
+  (let [github (gobj/get entity "login")]
+    (join-remote (assoc env ::join-root [:Contact/by-github github] ::remote :remote))))
+
 (defmethod attr-handler ::c.repository/github [{:keys [::p/entity] :as env}]
   (let [[owner name] (-> (gobj/get entity "name") (str/split #"/"))]
     (join-remote (assoc env ::join-root [::g.repository/by-owner-and-name [owner name]] ::remote :github))))
+
+(defmethod attr-handler :github.root/viewer [env]
+  (join-remote (assoc env ::join-root :viewer ::remote :github)))
 
 (defn composed-query [{::keys [url q attr-handler app]}]
   (go
@@ -413,7 +479,8 @@
           (fulcro/new-fulcro-client
             :started-callback (fn [{:keys [reconciler]}]
                                 (fetch/load reconciler :app/all-groups GroupMenuItem {:target [:contact-app/instance "main" :app/all-groups]}))
-            :networking {:remote (graphql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5" app)
+            :networking {:remote (-> (graphql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5" app)
+                                     (batch-network))
                          :github (-> (graphql-network (str "https://api.github.com/graphql?access_token=" (get-token)) app)
                                      (batch-network))})))
 

@@ -1,10 +1,12 @@
 (ns fulcro-graphql.models.github.repository
   (:require [cljs.spec.alpha :as s]))
 
+(s/def ::graph-node (s/keys :opt [::id ::name ::url ::owner ::viewer-has-starred]))
+
 (s/def ::id string?)
 (s/def ::name string?)
+(s/def ::url string?)
+(s/def ::viewer-has-starred boolean?)
 
-#_ (s/def ::owner :fulcro-graphql.models.github.user/graph-node)
-#_ (s/def ::contacts-repo :fulcro-graphql.models.contacts.repository/graph-node)
-
-(s/def ::graph-node (s/keys :opt [::id ::name ::owner]))
+(s/def ::owner :fulcro-graphql.models.github.user/graph-node)
+(s/def ::contacts-repo :fulcro-graphql.models.contacts.repository/graph-node)
