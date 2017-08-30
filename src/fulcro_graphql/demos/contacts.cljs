@@ -10,6 +10,11 @@
             [com.wsscode.pathom.fulcro :refer [batch-network]]
             [com.wsscode.fulcro-graphql.network :as gn]
             [fulcro-graphql.styles :as style]
+            [fulcro-graphql.models.contacts.contact :as c.contact]
+            [fulcro-graphql.models.contacts.group :as c.group]
+            [fulcro-graphql.models.contacts.repository :as c.repository]
+            [fulcro-graphql.models.github.repository :as g.repository]
+            [fulcro-graphql.models.github.user :as g.user]
             [fulcro-css.css :as css]
             [fulcro.client.core :as fulcro]
             [fulcro.client.mutations :as mutations :include-macros true]
@@ -33,23 +38,23 @@
    (assoc ast :params (assoc params ::gql/mutate-join [{:contacts-contact [:id]}
                                                        {:groups-group [:id]}]))})
 
-(defmethod mutations/mutate `create-contact [{:keys [state ast]} _ {:contact/keys [id group-id github] :as contact}]
+(defmethod mutations/mutate `create-contact [{:keys [state ast]} _ {::c.contact/keys [id group-id github] :as contact}]
   {:remote
-   (assoc ast :params (select-keys contact [:contact/id :contact/github]))
+   (assoc ast :params (select-keys contact [::c.contact/id ::c.contact/github]))
 
    :action
    (fn []
      (let [ref       [:Contact/by-id id]
            group-ref [:Group/by-id group-id]
            new-user  (fulcro/get-initial-state AddUserForm {})]
-       (swap! state (comp #(update-in % (conj group-ref :group/contacts) conj ref)
-                          #(assoc-in % (conj ref :contact/github-node) [:github.user/by-login github])
-                          #(assoc-in % [:Contact/by-id (:contact/id new-user)] new-user)
-                          #(assoc-in % (conj group-ref :ui/new-contact) [:Contact/by-id (:contact/id new-user)])))))})
+       (swap! state (comp #(update-in % (conj group-ref ::c.group/contacts) conj ref)
+                          #(assoc-in % (conj ref ::c.contact/github-user) [:github.user/by-login github])
+                          #(assoc-in % [:Contact/by-id (::c.contact/id new-user)] new-user)
+                          #(assoc-in % (conj group-ref :ui/new-contact) [:Contact/by-id (::c.contact/id new-user)])))))})
 
-(defmethod mutations/mutate `create-group [{:keys [state ast ref]} _ {:group/keys [id] :as group}]
+(defmethod mutations/mutate `create-group [{:keys [state ast ref]} _ {::c.group/keys [id] :as group}]
   {:remote
-   (assoc ast :params (select-keys group [:group/id :group/name]))
+   (assoc ast :params (select-keys group [::c.group/id ::c.group/name]))
 
    :action
    (fn []
@@ -57,9 +62,9 @@
        (swap! state (comp #(update-in % (conj ref :app/all-groups) conj group-ref)
                           #(assoc-in % group-ref group)))))})
 
-(defmethod mutations/mutate `update-group [{:keys [state ast]} _ {:group/keys [id] :as group}]
+(defmethod mutations/mutate `update-group [{:keys [state ast]} _ {::c.group/keys [id] :as group}]
   {:remote
-   (assoc ast :params (-> (select-keys group [:group/id :group/name])
+   (assoc ast :params (-> (select-keys group [::c.group/id ::c.group/name])
                           (assoc ::gql/mutate-join [:id])))
 
    :action
@@ -67,12 +72,12 @@
      (let [group-ref [:Group/by-id id]]
        (swap! state assoc-in group-ref group)))})
 
-(defmethod mutations/mutate `select-group [{:keys [state reconciler ref]} _ {:keys [group/id]}]
+(defmethod mutations/mutate `select-group [{:keys [state reconciler ref]} _ {:keys [::c.group/id]}]
   {:action
    (fn []
      (if-not (get-in @state [:Group/by-id id :ui/new-contact])
        (let [new-user    (fulcro/get-initial-state AddUserForm {})
-             contact-ref [:Contact/by-id (:contact/id new-user)]]
+             contact-ref [:Contact/by-id (::c.contact/id new-user)]]
          (swap! state (comp #(assoc-in % [:Group/by-id id :ui/new-contact] contact-ref)
                             #(assoc-in % contact-ref new-user)))))
 
@@ -86,21 +91,21 @@
 
 (om/defui ^:once ContactGithubInfo
   static om/IQuery
-  (query [_] [:github/login :github/avatar-url :github/name :github/company :github/viewer-is-following])
+  (query [_] [::g.user/login ::g.user/avatar-url ::g.user/name ::g.user/company ::g.user/viewer-is-following])
 
   static om/Ident
-  (ident [_ props] [:github.user/by-login (:github/login props)]))
+  (ident [_ props] [:github.user/by-login (::g.user/login props)]))
 
 (om/defui ^:once Contact
   static fulcro/InitialAppState
   (initial-state [_ _] {})
 
   static om/IQuery
-  (query [_] [:contact/id :contact/github
-              {:contact/github-node (om/get-query ContactGithubInfo)}])
+  (query [_] [::c.contact/id ::c.contact/github
+              {::c.contact/github-user (om/get-query ContactGithubInfo)}])
 
   static om/Ident
-  (ident [_ props] [:Contact/by-id (:contact/id props)])
+  (ident [_ props] [:Contact/by-id (::c.contact/id props)])
 
   static css/CSS
   (local-rules [_] [[:.container {:text-align "center"}]
@@ -109,8 +114,8 @@
 
   Object
   (render [this]
-    (let [{:contact/keys [github github-node]} (om/props this)
-          {:github/keys [viewer-is-following avatar-url name company]} github-node
+    (let [{::c.contact/keys [github github-node]} (om/props this)
+          {::g.user/keys [viewer-is-following avatar-url name company]} github-node
           css (css/get-classnames Contact)]
       (dom/div #js {:className (:container css)}
         (dom/div nil
@@ -127,14 +132,14 @@
 
 (om/defui ^:once AddUserForm
   static fulcro/InitialAppState
-  (initial-state [_ _] {:contact/id     (om/tempid)
-                        :contact/github ""})
+  (initial-state [_ _] {::c.contact/id     (om/tempid)
+                        ::c.contact/github ""})
 
   static om/IQuery
-  (query [_] [:contact/id :contact/github])
+  (query [_] [::c.contact/id ::c.contact/github])
 
   static om/Ident
-  (ident [_ props] [:Contact/by-id (:contact/id props)])
+  (ident [_ props] [:Contact/by-id (::c.contact/id props)])
 
   static css/CSS
   (local-rules [_] [])
@@ -142,20 +147,20 @@
 
   Object
   (render [this]
-    (let [{:keys [contact/github] :as props} (om/props this)
-          {:keys [group/id]} (om/get-computed props)
+    (let [{:keys [::c.contact/github] :as props} (om/props this)
+          {:keys [::c.group/id]} (om/get-computed props)
           css (css/get-classnames AddUserForm)]
       (dom/form #js {:className "form-row align-items-center"
                      :onSubmit  (fn [e]
                                   (.preventDefault e)
-                                  (om/transact! this [`(create-contact ~(assoc props :contact/group-id id))
+                                  (om/transact! this [`(create-contact ~(assoc props ::c.contact/group-id id))
                                                       :ui/new-user
-                                                      :group/contacts])
+                                                      ::c.group/contacts])
                                   (fetch/load this [:github.user/by-login github] ContactGithubInfo {:remote  :github
-                                                                                                     :refresh [:contact/github]})
+                                                                                                     :refresh [::c.contact/github]})
                                   (js/setTimeout
                                     (fn []
-                                      (om/transact! this [`(add-to-group-on-contact {:contacts-contact-id ~(:contact/id props)
+                                      (om/transact! this [`(add-to-group-on-contact {:contacts-contact-id ~(::c.contact/id props)
                                                                                      :groups-group-id     ~id})]))
                                     10))}
         (dom/div #js {:className "col-auto"}
@@ -163,7 +168,7 @@
                           :value       github
                           :placeholder "Github user name"
                           :className   "form-control"
-                          :onChange    #(mutations/set-string! this :contact/github :event %)}))
+                          :onChange    #(mutations/set-string! this ::c.contact/github :event %)}))
         (dom/div #js {:className "col-auto"}
           (dom/button #js {:className "btn btn-primary"
                            :type      "submit"}
@@ -176,12 +181,12 @@
   (initial-state [_ _] {})
 
   static om/IQuery
-  (query [_] [:repository/id :repository/name
-              {:repository/github
-               [:repository/name {:repository/owner [:github/login]}]}])
+  (query [_] [::c.repository/id ::c.repository/name
+              {::c.repository/github
+               [::g.repository/name {::g.repository/owner [::g.user/login]}]}])
 
   static om/Ident
-  (ident [_ props] [:Repository/by-id (:repository/id props)])
+  (ident [_ props] [:Repository/by-id (::c.repository/id props)])
 
   static css/CSS
   (local-rules [_] [])
@@ -189,12 +194,12 @@
 
   Object
   (render [this]
-    (let [{:repository/keys [name github]} (om/props this)
+    (let [{::c.repository/keys [name github]} (om/props this)
           css (css/get-classnames Repository)]
       (dom/div nil
         "REPO"
         (dom/div nil name)
-        (dom/div nil (-> github :repository/owner :user/login (or "")))))))
+        (dom/div nil (-> github ::g.repository/owner ::g.user/login (or "")))))))
 
 (def repository (om/factory Repository))
 
@@ -203,13 +208,13 @@
   (initial-state [_ _] {})
 
   static om/IQuery
-  (query [_] [:group/id :group/name
-              {:group/repositories (om/get-query Repository)}
-              #_ {:group/contacts (om/get-query Contact)}
-              #_ {:ui/new-contact (om/get-query AddUserForm)}])
+  (query [_] [::c.group/id ::c.group/name
+              {::c.group/repositories (om/get-query Repository)}
+              #_{::c.group/contacts (om/get-query Contact)}
+              #_{:ui/new-contact (om/get-query AddUserForm)}])
 
   static om/Ident
-  (ident [_ props] [:Group/by-id (:group/id props)])
+  (ident [_ props] [:Group/by-id (::c.group/id props)])
 
   static css/CSS
   (local-rules [_] [[:.contacts {:display               "grid"
@@ -221,37 +226,37 @@
 
   Object
   (render [this]
-    (let [{:group/keys [name contacts repositories]
+    (let [{::c.group/keys [name contacts repositories]
            :ui/keys    [new-contact]
            :as         props} (om/props this)
           css (css/get-classnames GroupView)]
       (dom/div nil
         (dom/h1 #js {:className (:title css)}
                 (dom/a #js {:onClick #(if-let [new-name (js/prompt "New group name" name)]
-                                        (om/transact! this [`(update-group ~(assoc props :group/name new-name))]))}
+                                        (om/transact! this [`(update-group ~(assoc props ::c.group/name new-name))]))}
                   (str name)))
-        #_ (add-user-form (om/computed new-contact props))
+        #_(add-user-form (om/computed new-contact props))
         (dom/div #js {:className (:contacts css)}
           (->> repositories
-               (sort-by :repository/name)
+               (sort-by ::c.repository/name)
                (map repository)))
-        #_ (dom/div #js {:className (:contacts css)}
-          (->> contacts
-               (sort-by :contact/github)
-               (map contact)))))))
+        #_(dom/div #js {:className (:contacts css)}
+            (->> contacts
+                 (sort-by ::c.contact/github)
+                 (map contact)))))))
 
 (def group-view (om/factory GroupView))
 
 (om/defui ^:once GroupMenuItem
   static fulcro/InitialAppState
-  (initial-state [_ _] {:group/id   (om/tempid)
-                        :group/name ""})
+  (initial-state [_ _] {::c.group/id   (om/tempid)
+                        ::c.group/name ""})
 
   static om/IQuery
-  (query [_] [:group/id :group/name])
+  (query [_] [::c.group/id ::c.group/name])
 
   static om/Ident
-  (ident [_ props] [:Group/by-id (:group/id props)])
+  (ident [_ props] [:Group/by-id (::c.group/id props)])
 
   static css/CSS
   (local-rules [_] [[:.container {:cursor "pointer"}]
@@ -260,7 +265,7 @@
 
   Object
   (render [this]
-    (let [{:group/keys [name] :as props} (om/props this)
+    (let [{::c.group/keys [name] :as props} (om/props this)
           {:keys [event/on-select ui/selected?]} (om/get-computed props)
           css (css/get-classnames GroupMenuItem)]
       (dom/div #js {:onClick   #(on-select props)
@@ -300,15 +305,15 @@
         (dom/div #js {:className (:group-menu css)}
           (dom/button #js {:className "btn btn-primary"
                            :onClick   #(if-let [name (js/prompt "New group name")]
-                                         (om/transact! this [`(create-group {:group/id   ~(om/tempid)
-                                                                             :group/name ~name})]))}
+                                         (om/transact! this [`(create-group {::c.group/id   ~(om/tempid)
+                                                                             ::c.group/name ~name})]))}
             "New Group")
           (dom/br nil)
           (dom/br nil)
           (map (comp group-menu-item
-                     #(om/computed % {:ui/selected?    (= (:group/id selected-group) (:group/id %))
+                     #(om/computed % {:ui/selected?    (= (::c.group/id selected-group) (::c.group/id %))
                                       :event/on-select (fn [group] (om/transact! this [`(select-group ~group)]))}))
-               (sort-by :group/name all-groups)))
+               (sort-by ::c.group/name all-groups)))
         (dom/div #js {:className (:group-view css)}
           (if selected-group
             (group-view selected-group)
@@ -367,13 +372,13 @@
           (async/close! c))))
     c))
 
-(defmethod attr-handler :contact/github-node [{:keys [::p/entity] :as env}]
+(defmethod attr-handler ::c.contact/github-user [{:keys [::p/entity] :as env}]
   (let [github (gobj/get entity "github")]
     (join-remote (assoc env ::join-root [:user/by-login github] ::remote :github))))
 
-(defmethod attr-handler :repository/github [{:keys [::p/entity] :as env}]
+(defmethod attr-handler ::c.repository/github [{:keys [::p/entity] :as env}]
   (let [[owner name] (-> (gobj/get entity "name") (str/split #"/"))]
-    (join-remote (assoc env ::join-root [:github.repository/by-owner-and-name [owner name]] ::remote :github))))
+    (join-remote (assoc env ::join-root [::g.repository/by-owner-and-name [owner name]] ::remote :github))))
 
 (defn composed-query [{::keys [url q attr-handler app]}]
   (go
@@ -424,43 +429,43 @@
 (comment
   (gql/ident-transform [:github.user/by-login "wilker"])
 
-  (println (gql/query->graphql `[(create-contact {:contact/id ~(om/tempid) :contact/github "bla"})]
+  (println (gql/query->graphql `[(create-contact {::c.contact/id ~(om/tempid) ::c.contact/github "bla"})]
                                {::gql/js-name gn/js-name}))
 
-  (-> `[(create-contact {:contact/id ~(om/tempid) :contact/github "bla"})]
+  (-> `[(create-contact {::c.contact/id ~(om/tempid) ::c.contact/github "bla"})]
       (om/query->ast)
       (om/ast->query))
 
-  (-> `[{(create-contact {:contact/id ~(om/tempid), :contact/github "caioaao"}) [:ui]}]
+  (-> `[{(create-contact {::c.contact/id ~(om/tempid), ::c.contact/github "caioaao"}) [:ui]}]
       (fulcro.client.impl.om-plumbing/strip-ui)
       #_pr-str)
 
-  (-> `{:dispatch-key create-contact, :key create-contact, :params {:contact/id ~(om/tempid), :contact/github "ccc"}, :type :call
+  (-> `{:dispatch-key create-contact, :key create-contact, :params {::c.contact/id ~(om/tempid), ::c.contact/github "ccc"}, :type :call
         :children     [{:type :prop, :dispatch-key :id, :key :id}]}
       (om/ast->query))
 
   (go
     (-> #::{:q            [{:app/all-contacts
-                            [:contact/id :contact/github
-                             {:contact/github-node [:user/avatar-url]}]}]
+                            [::c.contact/id ::c.contact/github
+                             {::c.contact/github-user [:user/avatar-url]}]}]
             :url          "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5"
             :attr-handler attr-handler}
         composed-query <! js/console.log))
 
   (go
     (-> #::{:q            [{[:Contact/by-id "cj6l0c526011j012989kbdzhh"]
-                            [:contact/id :contact/github
-                             {:contact/github-node [:user/avatar-url]}]}
+                            [::c.contact/id ::c.contact/github
+                             {::c.contact/github-user [:user/avatar-url]}]}
                            {[:Contact/by-id "cj6l0cdch012b0186yf6wcmvw"]
-                            [:contact/id :contact/github]}]
+                            [::c.contact/id ::c.contact/github]}]
             :url          "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5"
             :attr-handler attr-handler}
         composed-query <! js/console.log))
 
   (let [remotes (-> attr-handler methods keys set (disj :default))
         q       [{:app/all-contacts
-                  [:contact/id :contact/name :contact/github
-                   {:contact/github-node [:user/bio]}]}]]
+                  [::c.contact/id ::c.contact/name ::c.contact/github
+                   {::c.contact/github-user [:user/bio]}]}]]
     (-> q om/query->ast (elide-ast-nodes remotes) om/ast->query))
 
   (gql/ident->alias [:Contact/by-id "cj6l0c526011j012989kbdzhh"])
