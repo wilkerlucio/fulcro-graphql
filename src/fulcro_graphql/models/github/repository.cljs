@@ -8,5 +8,5 @@
 (s/def ::url string?)
 (s/def ::viewer-has-starred boolean?)
 
-(s/def ::owner :fulcro-graphql.models.github.user/graph-node)
-(s/def ::contacts-repo :fulcro-graphql.models.contacts.repository/graph-node)
+(s/def ::owner (s/and :fulcro-graphql.models.github.user/graph-node))
+(s/def ::contacts-repo (s/and :fulcro-graphql.models.contacts.repository/graph-node))

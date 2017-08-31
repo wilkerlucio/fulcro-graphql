@@ -10,5 +10,5 @@
 (s/def ::company string?)
 (s/def ::viewer-is-following boolean?)
 
-(s/def ::contact :fulcro-graphql.models.contacts.contact/graph-node)
+(s/def ::contact (s/and :fulcro-graphql.models.contacts.contact/graph-node))
 (s/def ::starred-repositories (s/coll-of :fulcro-graphql.models.github.repository/graph-node))

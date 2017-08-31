@@ -7,7 +7,7 @@
             [com.wsscode.pathom.core :as p]
             [com.wsscode.pathom.async :as pa]
             [com.wsscode.pathom.graphql :as gql]
-            [com.wsscode.pathom.fulcro :refer [batch-network]]
+            [com.wsscode.pathom.fulcro.network :refer [batch-network]]
             [com.wsscode.fulcro-graphql.network :as gn]
             [fulcro-graphql.styles :as style]
             [fulcro-graphql.models.contacts.contact :as c.contact]
@@ -486,6 +486,9 @@
 (defn log-state []
   (->> @app :reconciler :config :state deref
        js/console.log))
+
+(comment
+  (om/query->ast [{:user [:name :password]}]))
 
 (comment
   (gql/ident-transform [:github.user/by-login "wilker"])

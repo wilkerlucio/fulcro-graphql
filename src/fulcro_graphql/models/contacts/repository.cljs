@@ -6,5 +6,5 @@
 (s/def ::id string?)
 (s/def ::name string?)
 
-(s/def ::github :fulcro-graphql.models.github.repository/graph-node)
+(s/def ::github (s/and :fulcro-graphql.models.github.repository/graph-node))
 (s/def ::groups (s/coll-of :fulcro-graphql.models.contacts.group/graph-node))
