@@ -259,8 +259,10 @@
 
   static om/IQuery
   (query [_] [::c.group/id ::c.group/name :ui/fetch-state
-              {::c.group/repositories (om/get-query Repository)}
-              {:github.root/viewer (om/get-query GithubStarredReposPicker)}])
+              {:ui/new-contact (om/get-query AddUserForm)}
+              {::c.group/contacts (om/get-query Contact)}
+              #_ {::c.group/repositories (om/get-query Repository)}
+              #_ {:github.root/viewer (om/get-query GithubStarredReposPicker)}])
 
   static om/Ident
   (ident [_ props] [:Group/by-id (::c.group/id props)])
@@ -275,8 +277,8 @@
 
   Object
   (render [this]
-    (let [{::c.group/keys [name repositories]
-           :ui/keys       [fetch-state]
+    (let [{::c.group/keys [id name repositories contacts]
+           :ui/keys       [fetch-state new-contact]
            :keys          [github.root/viewer]
            :as            props} (om/props this)
           css (css/get-classnames GroupView)]
@@ -285,13 +287,18 @@
                 (dom/a #js {:onClick #(if-let [new-name (js/prompt "New group name" name)]
                                         (om/transact! this [`(update-group ~(assoc props ::c.group/name new-name))]))}
                   (str name)))
+        (add-user-form new-contact)
         (if (fetch/loading? fetch-state)
           "Loading...")
         (dom/div #js {:className (:contacts css)}
+          (->> contacts
+               (sort-by ::c.contact/github)
+               (map (comp contact #(om/computed % {::c.group/id id})))))
+        #_ (dom/div #js {:className (:contacts css)}
           (->> repositories
                (sort-by ::c.repository/name)
                (map repository)))
-        (if viewer
+        #_ (if viewer
           (github-starred-repos-picker viewer))))))
 
 (def group-view (om/factory GroupView))
