@@ -5,10 +5,8 @@
             [goog.object :as gobj]
             [cljs.core.async :refer [<!]]
             [com.wsscode.pathom.core :as p]
-            [com.wsscode.pathom.async :as pa]
             [com.wsscode.pathom.graphql :as gql]
-            [com.wsscode.pathom.fulcro.network :refer [batch-network]]
-            [com.wsscode.fulcro-graphql.network :as gn]
+            [com.wsscode.pathom.fulcro.network :as pfn]
             [fulcro-graphql.styles :as style]
             [fulcro-graphql.models.contacts.contact :as c.contact]
             [fulcro-graphql.models.contacts.group :as c.group]
@@ -20,8 +18,6 @@
             [fulcro.client.mutations :as mutations :include-macros true]
             [fulcro.client.data-fetch :as fetch]
             [com.wsscode.common.local-storage :as local-storage]
-            [fulcro.client.network :as fulcro.network]
-            [clojure.core.async :as async]
             [clojure.string :as str]))
 
 (defn get-token []
@@ -393,78 +389,36 @@
       (dom/div #js {:key react-key}
         (contacts-ui contacts)))))
 
-(declare composed-query)
-
-(defn elide-ast-nodes
-  "Remove items from a query (AST) that have a key listed in the elision-set"
-  [{:keys [key union-key] :as ast} elision-set]
-  (let [union-elision? (contains? elision-set union-key)]
-    (when-not (or union-elision? (contains? elision-set key))
-      (update ast :children (fn [c] (if c (vec (keep #(elide-ast-nodes % elision-set) c))))))))
-
-(defn ident-reader [{:keys [ast]
-                     :as   env}]
-  (if (vector? (:key ast))
-    (let [e (p/entity env)]
-      (pa/read-chan-values (p/join (gobj/get e (gql/ident->alias (:key ast)))
-                                   env)))
-    ::p/continue))
-
 (defmulti attr-handler p/key-dispatch)
 
 (defmethod attr-handler :default [_] ::p/continue)
 
-(defn join-remote [{::keys [app remote join-root]
-                    :keys  [query]}]
-  (let [c (async/promise-chan)]
-    (go
-      (if-let [network (-> app :networking (get remote))]
-        (fulcro.network/send network [{join-root query}] #(async/put! c (get % join-root)) #(async/put! c %))
-        (do
-          (js/console.warn "Invalid remote" {:remote remote})
-          (async/close! c))))
-    c))
-
 (defmethod attr-handler ::c.contact/github-user [{:keys [::p/entity] :as env}]
   (let [github (gobj/get entity "github")]
-    (join-remote (assoc env ::join-root [:user/by-login github] ::remote :github))))
+    (pfn/join-remote (assoc env ::pfn/join-root [:user/by-login github] ::pfn/remote :github))))
 
 (defmethod attr-handler ::g.user/contact [{:keys [::p/entity] :as env}]
   (let [github (gobj/get entity "login")]
-    (join-remote (assoc env ::join-root [:Contact/by-github github] ::remote :remote))))
+    (pfn/join-remote (assoc env ::pfn/join-root [:Contact/by-github github] ::pfn/remote :remote))))
 
 (defmethod attr-handler ::c.repository/github [{:keys [::p/entity] :as env}]
   (let [[owner name] (-> (gobj/get entity "name") (str/split #"/"))]
-    (join-remote (assoc env ::join-root [::g.repository/by-owner-and-name [owner name]] ::remote :github))))
+    (pfn/join-remote (assoc env ::pfn/join-root [::g.repository/by-owner-and-name [owner name]] ::pfn/remote :github))))
 
 (defmethod attr-handler :github.root/viewer [env]
-  (join-remote (assoc env ::join-root :viewer ::remote :github)))
+  (pfn/join-remote (assoc env ::pfn/join-root :viewer ::pfn/remote :github)))
 
-(defn composed-query [{::keys [url q attr-handler app]}]
-  (go
-    (let [without (-> attr-handler methods keys set (disj :default))
-          q'      (-> q om/query->ast (elide-ast-nodes without) om/ast->query)
-          json    (-> (gn/query #::gn{:url url :q q'}) <! ::gn/response-data)]
-      (-> (gn/parse {::p/entity (.-data json)
-                     ::p/reader [pa/js-obj-reader attr-handler ident-reader]
-                     ::app      app} q)
-          (pa/read-chan-values)
-          <!
-          (gn/lift-tempids)))))
+(defn elide-mm-attrs [method]
+  (fn [q]
+    (let [without (-> method methods keys set (disj :default))]
+      (-> q om/query->ast (p/elide-ast-nodes without) om/ast->query))))
 
-(defrecord Network [url app]
-  fulcro.network/NetworkBehavior
-  (serialize-requests? [_] true)
-
-  fulcro.network/FulcroNetwork
-  (send [_ edn ok error]
-    (go
-      (ok (<! (composed-query #::{:url url :q edn :attr-handler attr-handler :app @app})))))
-
-  (start [_]))
-
-(defn graphql-network [url app]
-  (map->Network {:url url :app app}))
+(defn gql-network [url app]
+  (pfn/graphql-network #::pfn{:url               url
+                              :gql-process-query (elide-mm-attrs attr-handler)
+                              :gql-process-env   (fn [env]
+                                                   (assoc env ::pfn/app @app
+                                                              ::p/process-reader #(conj % attr-handler)))}))
 
 (defonce app (atom nil))
 
@@ -473,10 +427,10 @@
           (fulcro/new-fulcro-client
             :started-callback (fn [{:keys [reconciler]}]
                                 (fetch/load reconciler :app/all-groups GroupMenuItem {:target [:contact-app/instance "main" :app/all-groups]}))
-            :networking {:remote (-> (graphql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5" app)
-                                     (batch-network))
-                         :github (-> (graphql-network (str "https://api.github.com/graphql?access_token=" (get-token)) app)
-                                     (batch-network))})))
+            :networking {:remote (-> (gql-network "https://api.graph.cool/simple/v1/cj6h5p18026ba0110ogeyn1o5" app)
+                                     (pfn/batch-network))
+                         :github (-> (gql-network (str "https://api.github.com/graphql?access_token=" (get-token)) app)
+                                     (pfn/batch-network))})))
 
 (defn init []
   (swap! app fulcro/mount Root "app-container"))
@@ -492,9 +446,6 @@
 
 (comment
   (gql/ident-transform [:github.user/by-login "wilker"])
-
-  (println (gql/query->graphql `[(create-contact {::c.contact/id ~(om/tempid) ::c.contact/github "bla"})]
-                               {::gql/js-name gn/js-name}))
 
   (-> `[(create-contact {::c.contact/id ~(om/tempid) ::c.contact/github "bla"})]
       (om/query->ast)
