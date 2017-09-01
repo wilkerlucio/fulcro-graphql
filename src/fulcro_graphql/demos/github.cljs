@@ -7,7 +7,7 @@
             [fulcro-graphql.styles :as style]
             [com.wsscode.common.local-storage :as local-storage]
             [com.wsscode.pathom.graphql :as gql]
-            [com.wsscode.fulcro-graphql.network :as gn :refer [graphql-network]]
+            [com.wsscode.pathom.fulcro.network :as gn :refer [graphql-network]]
             [om.dom :as dom]
             [om.next :as om]))
 
@@ -102,7 +102,7 @@
                               (om/transact! reconciler `[(~'fulcro/load {:query   ~(om/focus-query (om/get-query Root) [:github/user])
                                                                          :marker  true
                                                                          :refresh [:github/user]})]))
-          :networking (graphql-network (str "https://api.github.com/graphql?access_token=" (get-token))))))
+          :networking (graphql-network {::gn/url (str "https://api.github.com/graphql?access_token=" (get-token))}))))
 
 (defn init []
   (swap! app fulcro/mount Root "gh-app-container"))

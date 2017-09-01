@@ -7,7 +7,7 @@
             [fulcro-css.css :as css]
             [fulcro-graphql.styles :as style]
             [com.wsscode.pathom.graphql :as gql]
-            [com.wsscode.fulcro-graphql.network :as gql.network :refer [graphql-network]]
+            [com.wsscode.pathom.fulcro.network :as gql.network :refer [graphql-network]]
             [om.dom :as dom]
             [om.next :as om])
   (:import [goog.Uri]))
@@ -240,7 +240,7 @@
 
 (defonce app
   (atom (fulcro/new-fulcro-client
-          :networking (graphql-network "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0")
+          :networking (graphql-network {::gql.network/url "https://api.graph.cool/simple/v1/cj5k0e0j74cpv0122vmzoqzi0"})
           :started-callback (fn [app] (fetch/load app :link/all-links UiLink {:target [:page/by-id :page/top-links :link/all-links]})))))
 
 (defn init [] (swap! app fulcro/mount Root "app-container"))
