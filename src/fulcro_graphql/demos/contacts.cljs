@@ -3,6 +3,7 @@
   (:require [om.next :as om]
             [om.dom :as dom]
             [goog.object :as gobj]
+            [goog.functions :as gfunc]
             [cljs.core.async :refer [<!]]
             [com.wsscode.pathom.core :as p]
             [com.wsscode.pathom.graphql :as gql]
@@ -17,8 +18,10 @@
             [fulcro.client.core :as fulcro]
             [fulcro.client.mutations :as mutations :include-macros true]
             [fulcro.client.data-fetch :as fetch]
+            [fulcro.ui.forms :as forms]
             [com.wsscode.common.local-storage :as local-storage]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.spec.alpha :as s]))
 
 (defn get-token []
   (if-let [token (local-storage/get "github-token")]
@@ -45,6 +48,7 @@
            new-user  (fulcro/get-initial-state AddUserForm {})]
        (swap! state (comp #(update-in % (conj group-ref ::c.group/contacts) conj ref)
                           #(assoc-in % (conj ref ::c.contact/github-user) [:github.user/by-login github])
+                          #(assoc-in % [:github.user/by-login github] {::g.user/login github})
                           #(assoc-in % [:Contact/by-id (::c.contact/id new-user)] new-user)
                           #(assoc-in % (conj group-ref :ui/new-contact) [:Contact/by-id (::c.contact/id new-user)])))))})
 
@@ -87,7 +91,7 @@
 
 (om/defui ^:once GithubUserView
   static om/IQuery
-  (query [_] [::g.user/login ::g.user/avatar-url])
+  (query [_] [::g.user/login ::g.user/avatar-url ::g.user/company ::g.user/name])
 
   static om/Ident
   (ident [_ props] [:github.user/by-login (::g.user/login props)])
@@ -99,13 +103,18 @@
 
   Object
   (render [this]
-    (let [{::g.user/keys [avatar-url login]} (om/props this)
+    (let [{::g.user/keys [avatar-url login company name]} (om/props this)
           css (css/get-classnames GithubUserView)]
-      (dom/div #js {:className (:container css)}
-        (dom/div nil
-          (dom/img #js {:className (:avatar css)
-                        :src       avatar-url}))
-        (dom/div nil login)))))
+      (if (= ::p/not-found login)
+        (dom/div #js {:className (:container css)}
+          "Not found")
+        (dom/div #js {:className (:container css)}
+          (dom/div nil
+            (dom/img #js {:className (:avatar css)
+                          :src       avatar-url}))
+          (dom/div nil login)
+          (dom/div nil name)
+          (dom/div nil company))))))
 
 (def github-user-view (om/factory GithubUserView))
 
@@ -126,19 +135,41 @@
 
   Object
   (render [this]
-    (let [{::c.contact/keys [github-user]} (om/props this)
+    (let [{::c.contact/keys [github-user github]} (om/props this)
           css (css/get-classnames Contact)]
-      (github-user-view github-user))))
+      (if (= ::p/not-found (::g.user/login github-user))
+        (dom/div nil (str "Not found " github))
+        (github-user-view github-user)))))
 
 (def contact (om/factory Contact))
 
+(defmethod mutations/mutate `verify-gh-user-validity [{:keys [state]} _ {:keys [ref github]}]
+  {:action
+   (fn []
+     (let [errors (get-in @state [:github.user/by-login github ::pfn/graphql-errors])]
+       (swap! state assoc-in (conj ref :ui/github-valid?) (not (seq errors)))))})
+
+(defn check-github-validity [comp github]
+  (om/transact! comp [`(~'fulcro/load ~{:remote               :github
+                                        :ident                [:github.user/by-login github]
+                                        :query                [::g.user/avatar-url
+                                                               {::pfn/graphql-errors [:type]}]
+                                        :refresh              [:ui/github-valid?]
+                                        :post-mutation        `verify-gh-user-validity
+                                        :post-mutation-params {:ref    (om/get-ident comp)
+                                                               :github github}})]))
+
+(def check-github-validity-debounced (gfunc/debounce check-github-validity 800))
+
 (om/defui ^:once AddUserForm
   static fulcro/InitialAppState
-  (initial-state [_ _] {::c.contact/id     (om/tempid)
-                        ::c.contact/github ""})
+  (initial-state [this _]
+    (forms/build-form this {::c.contact/id     (om/tempid)
+                            ::c.contact/github ""
+                            :ui/github-valid? false}))
 
   static om/IQuery
-  (query [_] [::c.contact/id ::c.contact/github])
+  (query [_] [::c.contact/id ::c.contact/github :ui/github-valid?])
 
   static om/Ident
   (ident [_ props] [:Contact/by-id (::c.contact/id props)])
@@ -149,8 +180,10 @@
 
   Object
   (render [this]
-    (let [{:keys [::c.contact/github] :as props} (om/props this)
-          {:keys [::c.group/id]} (om/get-computed props)
+    (let [{:keys [::c.contact/github]
+           :ui/keys [github-valid?]
+           :as props} (om/props this)
+          {::c.group/keys [id]} (om/get-computed props)
           css (css/get-classnames AddUserForm)]
       (dom/form #js {:className "form-row align-items-center"
                      :onSubmit  (fn [e]
@@ -169,12 +202,21 @@
           (dom/input #js {:type        "text"
                           :value       github
                           :placeholder "Github user name"
-                          :className   "form-control"
-                          :onChange    #(mutations/set-string! this ::c.contact/github :event %)}))
+                          :className   (cond-> "form-control"
+                                         (and (s/valid? ::c.contact/github github)
+                                              (not github-valid?)) (str " is-invalid"))
+                          :onChange    #(do
+                                          (check-github-validity-debounced this (.. % -target -value))
+                                          (mutations/set-value! this :ui/github-valid? false)
+                                          (mutations/set-string! this ::c.contact/github :event %))}))
         (dom/div #js {:className "col-auto"}
           (dom/button #js {:className "btn btn-primary"
+                           :disabled  (not (and github-valid? (s/valid? ::c.contact/new-contact props)))
                            :type      "submit"}
             "Add"))))))
+
+(comment
+  (s/valid? ::c.contact/new-contact {::c.contact/github "abc"}))
 
 (def add-user-form (om/factory AddUserForm))
 
@@ -260,9 +302,7 @@
   static om/IQuery
   (query [_] [::c.group/id ::c.group/name :ui/fetch-state
               {:ui/new-contact (om/get-query AddUserForm)}
-              {::c.group/contacts (om/get-query Contact)}
-              #_ {::c.group/repositories (om/get-query Repository)}
-              #_ {:github.root/viewer (om/get-query GithubStarredReposPicker)}])
+              {::c.group/contacts (om/get-query Contact)}])
 
   static om/Ident
   (ident [_ props] [:Group/by-id (::c.group/id props)])
@@ -273,33 +313,27 @@
                                  :justify-items         "center"
                                  :grid-gap              "26px"}]
                     [:.title {:cursor "pointer"}]])
-  (include-children [_] [Contact AddUserForm Repository GithubStarredReposPicker])
+  (include-children [_] [Contact AddUserForm])
 
   Object
   (render [this]
-    (let [{::c.group/keys [id name repositories contacts]
+    (let [{::c.group/keys [id name contacts]
            :ui/keys       [fetch-state new-contact]
-           :keys          [github.root/viewer]
            :as            props} (om/props this)
           css (css/get-classnames GroupView)]
       (dom/div nil
         (dom/h1 #js {:className (:title css)}
-                (dom/a #js {:onClick #(if-let [new-name (js/prompt "New group name" name)]
-                                        (om/transact! this [`(update-group ~(assoc props ::c.group/name new-name))]))}
-                  (str name)))
-        (add-user-form new-contact)
+          (dom/a #js {:onClick #(if-not (fetch/loading? fetch-state)
+                                  (if-let [new-name (js/prompt "New group name" name)]
+                                    (om/transact! this [`(update-group ~(assoc props ::c.group/name new-name))])))}
+            (str name)))
+        (add-user-form (om/computed new-contact {::c.group/id id}))
         (if (fetch/loading? fetch-state)
           "Loading...")
         (dom/div #js {:className (:contacts css)}
           (->> contacts
                (sort-by ::c.contact/github)
-               (map (comp contact #(om/computed % {::c.group/id id})))))
-        #_ (dom/div #js {:className (:contacts css)}
-          (->> repositories
-               (sort-by ::c.repository/name)
-               (map repository)))
-        #_ (if viewer
-          (github-starred-repos-picker viewer))))))
+               (map contact)))))))
 
 (def group-view (om/factory GroupView))
 
@@ -414,6 +448,8 @@
 
 (defmethod attr-handler :github.root/viewer [env]
   (pfn/join-remote (assoc env ::pfn/join-root :viewer ::pfn/remote :github)))
+
+(defmethod attr-handler ::pfn/graphql-errors [env] (pfn/gql-error-reader env))
 
 (defn elide-mm-attrs [method]
   (fn [q]

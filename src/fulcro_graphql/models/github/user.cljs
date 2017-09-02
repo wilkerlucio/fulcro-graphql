@@ -2,9 +2,10 @@
   (:require [cljs.spec.alpha :as s]))
 
 (s/def ::graph-node
-  (s/keys :opt [::id ::login ::avatar-url ::company ::viewer-is-following ::contact ::starred-repositories]))
+  (s/keys :opt [::id ::name ::login ::avatar-url ::company ::viewer-is-following ::contact ::starred-repositories]))
 
 (s/def ::id string?)
+(s/def ::name string?)
 (s/def ::login string?)
 (s/def ::avatar-url string?)
 (s/def ::company string?)
