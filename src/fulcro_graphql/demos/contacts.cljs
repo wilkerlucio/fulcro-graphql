@@ -30,6 +30,15 @@
       (local-storage/set! "github-token" token)
       token)))
 
+(defn pd [f]
+  (fn [e]
+    (.preventDefault e)
+    (f e)))
+
+(defn call-computed [props fname & args]
+  (if-let [f (om/get-computed props fname)]
+    (apply f args)))
+
 (declare AddUserForm GroupView)
 
 (defmethod mutations/mutate `add-to-group-on-contact [{:keys [ast]} _ params]
@@ -51,6 +60,19 @@
                           #(assoc-in % [:github.user/by-login github] {::g.user/login github})
                           #(assoc-in % [:Contact/by-id (::c.contact/id new-user)] new-user)
                           #(assoc-in % (conj group-ref :ui/new-contact) [:Contact/by-id (::c.contact/id new-user)])))))})
+
+(defn vector-remove [v item]
+  (filterv (complement #{item}) v))
+
+(defmethod mutations/mutate `delete-contact [{:keys [state ast]} _ {cid ::c.contact/id gid ::c.group/id}]
+  {:remote
+   (assoc ast :params {:id cid
+                       ::gql/mutate-join [:id]})
+
+   :action
+   (fn []
+     (swap! state (comp #(update % :Contact/by-id dissoc cid)
+                        #(update-in % [:Group/by-id gid ::c.group/contacts] vector-remove [:Contact/by-id cid]))))})
 
 (defmethod mutations/mutate `create-group [{:keys [state ast ref]} _ {::c.group/keys [id] :as group}]
   {:remote
@@ -135,11 +157,14 @@
 
   Object
   (render [this]
-    (let [{::c.contact/keys [github-user github]} (om/props this)
+    (let [{::c.contact/keys [id github-user github] :as props} (om/props this)
           css (css/get-classnames Contact)]
-      (if (= ::p/not-found (::g.user/login github-user))
-        (dom/div nil (str "Not found " github))
-        (github-user-view github-user)))))
+      (dom/div nil
+        (if (= ::p/not-found (::g.user/login github-user))
+          (dom/div nil (str "Not found " github))
+          (github-user-view github-user))
+        (dom/a #js {:href    "#"
+                    :onClick (pd #(call-computed props :on-delete id))} "Remove")))))
 
 (def contact (om/factory Contact))
 
@@ -166,7 +191,7 @@
   (initial-state [this _]
     (forms/build-form this {::c.contact/id     (om/tempid)
                             ::c.contact/github ""
-                            :ui/github-valid? false}))
+                            :ui/github-valid?  false}))
 
   static om/IQuery
   (query [_] [::c.contact/id ::c.contact/github :ui/github-valid?])
@@ -180,9 +205,9 @@
 
   Object
   (render [this]
-    (let [{:keys [::c.contact/github]
+    (let [{:keys    [::c.contact/github]
            :ui/keys [github-valid?]
-           :as props} (om/props this)
+           :as      props} (om/props this)
           {::c.group/keys [id]} (om/get-computed props)
           css (css/get-classnames AddUserForm)]
       (dom/form #js {:className "form-row align-items-center"
@@ -204,7 +229,8 @@
                           :placeholder "Github user name"
                           :className   (cond-> "form-control"
                                          (and (s/valid? ::c.contact/github github)
-                                              (not github-valid?)) (str " is-invalid"))
+                                              (not github-valid?))
+                                         (str " is-invalid"))
                           :onChange    #(do
                                           (check-github-validity-debounced this (.. % -target -value))
                                           (mutations/set-value! this :ui/github-valid? false)
@@ -214,9 +240,6 @@
                            :disabled  (not (and github-valid? (s/valid? ::c.contact/new-contact props)))
                            :type      "submit"}
             "Add"))))))
-
-(comment
-  (s/valid? ::c.contact/new-contact {::c.contact/github "abc"}))
 
 (def add-user-form (om/factory AddUserForm))
 
@@ -333,6 +356,10 @@
         (dom/div #js {:className (:contacts css)}
           (->> contacts
                (sort-by ::c.contact/github)
+               (map #(om/computed % {:on-delete
+                                     (fn [cid]
+                                       (om/transact! this [`(delete-contact {::c.contact/id ~cid
+                                                                             ::c.group/id ~id})]))}))
                (map contact)))))))
 
 (def group-view (om/factory GroupView))
