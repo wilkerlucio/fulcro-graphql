@@ -18,7 +18,6 @@
             [fulcro.client.core :as fulcro]
             [fulcro.client.mutations :as mutations :include-macros true]
             [fulcro.client.data-fetch :as fetch]
-            [fulcro.ui.forms :as forms]
             [com.wsscode.common.local-storage :as local-storage]
             [clojure.string :as str]
             [clojure.spec.alpha :as s]))
@@ -66,7 +65,7 @@
 
 (defmethod mutations/mutate `delete-contact [{:keys [state ast]} _ {cid ::c.contact/id gid ::c.group/id}]
   {:remote
-   (assoc ast :params {:id cid
+   (assoc ast :params {:id               cid
                        ::gql/mutate-join [:id]})
 
    :action
@@ -132,11 +131,17 @@
           "Not found")
         (dom/div #js {:className (:container css)}
           (dom/div nil
-            (dom/img #js {:className (:avatar css)
-                          :src       avatar-url}))
+            (dom/a #js {:href   (str "https://github.com/" login)
+                        :target "_blank"}
+              (dom/img #js {:className (:avatar css)
+                            :src       avatar-url})))
           (dom/div nil login)
           (dom/div nil name)
-          (dom/div nil company))))))
+          (dom/div nil
+            (if-let [[_ c] (some->> company (re-find #"^@(.+)"))]
+              (dom/a #js {:href   (str "https://github.com/" c)
+                          :target "_blank"} company)
+              company)))))))
 
 (def github-user-view (om/factory GithubUserView))
 
@@ -188,10 +193,9 @@
 
 (om/defui ^:once AddUserForm
   static fulcro/InitialAppState
-  (initial-state [this _]
-    (forms/build-form this {::c.contact/id     (om/tempid)
-                            ::c.contact/github ""
-                            :ui/github-valid?  false}))
+  (initial-state [this _] {::c.contact/id     (om/tempid)
+                           ::c.contact/github ""
+                           :ui/github-valid?  false})
 
   static om/IQuery
   (query [_] [::c.contact/id ::c.contact/github :ui/github-valid?])
@@ -359,7 +363,7 @@
                (map #(om/computed % {:on-delete
                                      (fn [cid]
                                        (om/transact! this [`(delete-contact {::c.contact/id ~cid
-                                                                             ::c.group/id ~id})]))}))
+                                                                             ::c.group/id   ~id})]))}))
                (map contact)))))))
 
 (def group-view (om/factory GroupView))

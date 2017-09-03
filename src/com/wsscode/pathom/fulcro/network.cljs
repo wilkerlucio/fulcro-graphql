@@ -95,16 +95,6 @@
           (close! c))))
     c))
 
-(defn js-obj-on-path [base path]
-  (reduce (fn [context path-segment]
-            (if (gobj/get context path-segment)
-              (gobj/get context path-segment)
-              (let [o (js-obj)]
-                (gobj/set context path-segment o)
-                o)))
-          base
-          path))
-
 (defn gql-network-query [{::keys [url q
                                   gql-process-query
                                   gql-process-env]
